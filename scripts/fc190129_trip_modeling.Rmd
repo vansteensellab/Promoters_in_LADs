@@ -1,0 +1,709 @@
+---
+title: "Predicting TRIP barcode expression from chromatin features"
+author: "Federico Comoglio"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: journal
+    highlight: monochrome
+    toc: true
+    toc_float: true
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      cache      = FALSE,
+                      dev        = 'png',
+                      fig.align  = 'center')
+```
+
+---
+
+```{r libs and fun, echo = FALSE}
+library(tidyverse)
+library(here)
+library(glmnet)
+library(ggplot2)
+library(knitr)
+library(ggbeeswarm)
+library(cowplot)
+
+
+## Refs
+## Lasso regression
+#  	+ Adapted from: Comoglio and Paro (2014) PLoS Comp Biol
+
+## Lasso classifier
+#		+ Adapted from: Comoglio et al. (2015) Cell Reports
+#		+ Adapted from: Comoglio et al. (2018) Genome Res
+
+#' Least absolute shrinkage and selection operator (Lasso) regression and classification, and feature importance analysis using bootstrap-Lasso.
+#'
+#' @usage fitLasso(X, y, mode = 'regression', pos.idx, prop.train = 0.8, lambda.crit = 'se', n.models = 1, n.folds = 10, feature.imp = FALSE, seed = 2018, parallel = FALSE, n.cores = 1, ...)
+#'
+#' @param X matrix, an n x p feature matrix.
+#' @param y numeric vector for regression or a 0/1 binary vector for classification.
+#' @param mode character, specifying the model setup. It can be one of 'regression' or 'classification'. Default to 'regression'.
+#' @param pos.idx for mode classification, integer vector specifying the row indices of data points with class label 1 (i.e. positives) in X.
+#' @param prop.train numeric, the fraction of data points ((0, 1]) in X to be used for training. Default to 0.8. prop.train = 1 is not currently supported.
+#' @param lambda.crit character, the criterion for choosing the regularization parameter lambda after cross-validation. It can be one of 'se' (i.e. the largest value of lambda within one standard error from the minimum MSE/CVM) or 'min' (i.e. the value of lambda minimizing the MSE/CVM).
+#' @param n.models, integer, the number of models to be fitted.
+#' @param n.folds, integer, the number of folds to be used for cross-validation. This value can range from 3 to n (LOO). Default to 10.
+#' @param feature.imp, logical, whether feature importance analysis (bootstrap-lasso) should be carried out. Default to FALSE.
+#' @param n.boot, numeric, the number of bootstrap-Lasso models to be fitted.
+#' @param min.stab numeric, the stability coefficient threshold. It must be a value in (0, 1]. Default to 0.7.
+#' @param seed, numeric, the seed to set for sampling. Default to 2018.
+#' @param parallel, logical, whether to register a parallel backend for parallel computing. Default to FALSE (i.e. monocore).
+#' @param n.cores, numeric, the number of cores to be used for parallel execution of cv.glmnet. Default to 1.
+#' @param ..., additional parameters to be passed to the plot function.
+#'
+#' @return Depending on 'mode' and 'feature.imp', performance measures and bootstrap-lasso results.
+#'
+#' @note None.
+#'
+#' @author Federico Comoglio
+#'
+#' @keywords core
+#'
+#' @export fitLasso
+
+fitLasso <- function(X, y, mode = 'regression', pos.idx, prop.train = 0.8, lambda.crit = 'se',
+	n.models = 1L, n.folds = 10L, feature.imp = FALSE, n.boot = 100, min.stab = 0.7, seed = 2018, parallel = FALSE, n.cores = 1, ...) {
+
+	## INIT
+	# validate parameters
+	allowed.modes <- c('regression', 'classification')
+	allowed.lambda.crit <- c('se', 'min')
+
+	if(!(mode %in% allowed.modes))
+		stop('Mode should be one of: ', allowed.modes)
+	if(missing(pos.idx) & mode == 'classification')
+		stop('For a classifier, pos.idx (index vector of positive examples) is required.')
+	if(prop.train <= 0 | prop.train > 1)
+		stop('The proportion of data points to be used for training is not in (0, 1].')
+	if(!(lambda.crit %in% allowed.lambda.crit))
+		stop('Invalid criterion for selection of lambda. It must be one of: ', allowed.lambda.crit)
+	if(feature.imp & (min.stab < 0 | min.stab > 1))
+		stop('The stability threshold (min.stab) is not in [0, 1].')
+
+	# warnings
+	if(prop.train == 1)
+		warning('All data points were used for training. Validation on a test set was suppressed.')
+
+	# if parallel, register backend
+	if(parallel)
+		doMC::registerDoMC(cores = n.cores)
+
+	# set seed for nSampling
+	set.seed(seed)
+
+	# init output vectors
+	perf.vec <- c()
+	perf.list <- list()
+	auc.vec   <- c()
+
+	## CORE
+	# regression
+	if(mode == 'regression') {
+
+		# fit n.models
+		for(i in 1 : n.models) {
+			# filter out incomplete cases
+			message('Original #data points: ', nrow(X))
+			keep     <- X %>% complete.cases
+			X.sample <- X[keep, ]
+			y.sample <- y[keep]
+			message('..of which complete cases: ', nrow(X.sample))
+
+			# training and test sets
+			n   			<- nrow(X.sample)
+			train.idx <- sample(1 : n, size = round(prop.train * n), replace = FALSE)
+			test.idx  <- setdiff(1 : n, train.idx)
+
+			X.train   <- X.sample[train.idx, ]
+			y.train   <- y.sample[train.idx]
+			X.test    <- X.sample[test.idx, ]
+			y.test    <- y.sample[test.idx]
+
+			# fit regression model with cross-validation
+			fit <- cv.glmnet(x            = X.train,
+											 y            = y.train,
+											 type.measure = 'mse',
+											 nfolds       = n.folds,
+										 	 parallel     = parallel)
+
+			# select lambda based on lambda.crit
+			lambda.idx <- ifelse(lambda.crit == 'se',
+										 which(fit$lambda == fit$lambda.1se),
+										 which(fit$lambda == fit$lambda.min))
+			lambda     <- fit$lambda[lambda.idx]
+
+			# performance summary (cross-validation)
+			message('Model MSE at selected ', lambda.crit, ' lambda: ', fit$cvm[lambda.idx])
+			message('..# of zero features: ', fit$nzero[lambda.idx])
+
+			# predict test set response
+			y.pred <- predict(object = fit,
+												newx   = X.test,
+												s      = lambda)
+
+			# evaluate performance/accuracy (AUC)
+			perf.vec[i] <- cor(y.test, y.pred, method = 'pearson')
+		}
+
+		# summarize performance (R^2)
+		message('R^2 summary:')
+		summary(perf.vec^2) %>% print
+
+	}
+
+	# classification
+	if(mode == 'classification') {
+
+		# compute indices of negatives
+		neg.idx.ss <- setdiff(1 : nrow(X), pos.idx)
+		n.pos      <- length(pos.idx)
+
+		# fit n.models
+		for(i in 1 : n.models) {
+				# data points --> balanced sample space
+				# randomly sample negatives
+				neg.idx <- sample(neg.idx.ss, size = n.pos, replace = FALSE)
+
+				sample.idx <- c(pos.idx, neg.idx)
+				X.sample <- X[sample.idx, ]
+				y.sample <- rep(c(1, 0), each = n.pos) %>%
+					as.factor
+
+				# filter out incomplete cases
+				message('Original #data points: ', nrow(X.sample))
+				keep     <- X.sample %>% complete.cases
+				X.sample <- X.sample[keep, ]
+				y.sample <- y.sample[keep]
+				message('..of which complete cases: ', nrow(X.sample))
+
+				# balanced sample space --> training and test sets
+				n   			<- nrow(X.sample)
+				train.idx <- sample(1 : n, size = round(prop.train * n), replace = FALSE)
+				test.idx  <- setdiff(1 : n, train.idx)
+
+				X.train <- X.sample[train.idx, ]
+				y.train <- y.sample[train.idx]
+				X.test  <- X.sample[test.idx, ]
+				y.test  <- y.sample[test.idx]
+
+				# fit classifier with cross-validation
+				fit <- cv.glmnet(x            = X.train,
+												 y            = y.train,
+												 family       = 'binomial',
+												 type.measure = 'class',
+												 nfolds       = n.folds,
+											   parallel     = parallel)
+
+				# select lambda based on lambda.crit
+				lambda.idx <- ifelse(lambda.crit == 'se',
+												which(fit$lambda == fit$lambda.1se),
+												which(fit$lambda == fit$lambda.min))
+				lambda     <- fit$lambda[lambda.idx]
+
+				# performance summary (cross-validation)
+				message('Model CVM at selected ', lambda.crit, ' lambda: ', fit$cvm[lambda.idx])
+				message('..# of zero features: ', fit$nzero[lambda.idx])
+
+				# predict class label of test set
+				y.pred <- predict(object = fit,
+													newx   = X.test,
+													type   = 'response',
+													s      = lambda)
+
+				# evaluate performance/accuracy (AUC)
+				pred <- prediction(y.pred, y.test )
+				perf <- performance(pred, 'tpr', 'fpr')
+				auc  <- performance(pred, 'auc')
+
+				perf.list[[i]] <- list(x = perf@x.values[[1]], y = perf@y.values[[1]])
+				auc.vec[i]     <- auc@y.values[[1]]
+		}
+
+		# summarize AUC vector
+		message('AUC summary:')
+		summary(auc.vec) %>% print
+
+		# plot ROCs + y=x
+		plot(perf, type = 'n', ...)
+		abline(0, 1, lty = 2, col = 'gray50')
+		sapply(1 : n.models, function(i) lines(perf.list[[i]]$x, perf.list[[i]]$y, col = 'orangered'))
+		legend('topleft', paste0('mean AUC = ', round(mean(auc.vec), 2)), bty = 'n')
+	}
+
+	# feature importance analysis (FIA)
+	if(feature.imp) {
+		B    <- getBootLassoCoef(X          = X,
+												     y          = y,
+												     mode       = 'regression',
+											    	 lambda.seq = fit$lambda,
+											    	 n.boot     = n.boot)
+		stab <- plotBootLasso(B, X, min.stab = min.stab)
+
+		# conditional return
+		# if FIA
+		return(list(perf       = switch(mode, 'regression'     = perf.vec,
+																					'classification' = perf.list),
+								auc.vec    = auc.vec,
+								boot.lasso = stab,
+								B          = B,
+								X          = X) )
+	} else {
+		# if no FIA
+		return(list(perf       = switch(mode, 'regression'     = perf.vec,
+																					'classification' = perf.list),
+								auc.vec    = auc.vec))
+	}
+}
+
+
+#' Feature selection analysis using bootstrap-Lasso.
+#'
+#' @usage getBootLassoCoef(X, y, mode = 'regression', lambda.seq, n.folds = 10L, n.boot = 100L)
+#'
+#' @param X matrix, an n x p feature matrix.
+#' @param y numeric vector for regression or a 0/1 binary vector for classification.
+#' @param mode character, specifying the model setup. It can be one of 'regression' or 'classification'. Default to 'regression'.
+#' @param lambda.seq numeric vector containing the sequence of regularization parameters to be used. This is usually first obtained by fitting a cross-validated model by a call to cv.glmnet.
+#' @param n.boot, integer, the number of bootstrap-Lasso models to be fitted. Default to 100.
+#'
+#' @return an n x p x k coefficients array
+#'
+#' @note None.
+#'
+#' @author Federico Comoglio
+#'
+#' @keywords core
+#'
+#' @export getBootLassoCoef
+
+getBootLassoCoef <- function(X, y, mode = 'regression', lambda.seq, n.boot = 100L) {
+	# init coefficients array (n x p x k)
+	n.lambda <- lambda.seq %>% length
+	n        <- X %>% nrow
+	B <- array(NA, dim = c(ncol(X) + 1, n.lambda, n.boot))
+
+	# fit bootstrap lasso models
+	for(i in seq_len(n.boot)) {
+		# bootstrap sample of size n
+		boot.idx <- sample(1 : n, size = n, replace = TRUE)
+		X.boot <- X[boot.idx, ]
+		y.boot <- y[boot.idx]
+
+		# fit model based on boostrap sample
+		fit <- switch(mode, 'regression'     = glmnet(x = X.boot, y = y.boot, lambda = lambda.seq),
+												'classification' = glmnet(x = X.boot, y = y.Boot, family = 'binomial', lambda = lambda.seq))
+		B[, , i] <- fit %>%
+									coefficients %>%
+									as.matrix
+	}
+
+	#remove intercept
+	B <- B[-1, ,]
+
+	#return coefficients array
+	return(B)
+}
+
+#' Stability selection plot.
+#'
+#' @usage plotBootLasso(B, X, min.stab = 0.7)
+#'
+#' @param B array
+#' @param X matrix
+#' @param min.stab Default to 0.7.
+#'
+#' @return a stability selection plot.
+#'
+#' @note None.
+#'
+#' @author Federico Comoglio
+#'
+#' @keywords core
+#'
+#' @export plotBootLasso
+
+plotBootLasso <- function(B, X, min.stab = 0.7) {
+  #compute stability and z-scores
+	n <- nrow(B)
+	l <- list()
+	for(i in seq_len(n))
+		l[[i]] <- as.vector(B[ i, ,])
+	names(l) <- colnames(X)
+	stab     <- lapply(l, function(x) sum(x!=0))
+	stab     <- unlist(stab) / prod(dim(B)[2 : 3])
+	z        <- unlist(lapply(l, mean)) / unlist(lapply(l, sd))
+
+	#select stable features, order by stability
+  sel     <- which(stab >= min.stab)
+  sel     <- sel[order(stab[sel], decreasing = TRUE)]
+	stabSel <- stab[sel]
+	lSel    <- l[sel]
+	zSel    <- z[sel]
+
+  lPlus     <- lSel[zSel > 0]
+  lMinus    <- lSel[zSel < 0]
+	stabPlus  <- stabSel[zSel > 0]
+	stabMinus <- stabSel[zSel < 0]
+
+	message('Selected features: ', names(lSel))
+	message('..with z-scores: ', zSel)
+
+	filtered <- c(lMinus, rev(lPlus))
+
+  df <- reshape2::melt(filtered)
+  colnames(df) <- c('value', 'feature')
+
+  df.stab <- data.frame(c(stabMinus, stabPlus))
+  df.stab$feature <- rownames(df.stab)
+  colnames(df.stab) <- c('stability', 'feature')
+
+  df.direction <- data.frame(split(df$value, df$feature) %>% sapply(median))
+  df.direction$feature <- rownames(df.direction)
+  colnames(df.direction) <- c('direction', 'feature')
+  df.direction$direction <- as.factor(ifelse(df.direction$direction > 0, 1, 0))
+
+  df <- merge(df, df.stab, by = 'feature')
+  df <- merge(df, df.direction, by = 'feature')
+
+  df <- df[order(df$stability, decreasing = TRUE), ]
+  df$feature <- factor(df$feature, levels = filtered %>% names, ordered = TRUE)
+
+  p <- ggplot(df, aes(x = feature, y = value, fill = stability, col = direction)) +
+	           geom_violin(scale = 'width', trim = TRUE, size = 1) +
+             stat_summary(fun.data = mean_se, geom = "pointrange") +
+						 labs(y = 'Coefficient z-score') +
+             scale_fill_gradient(low = "white", high = rgb(247/255, 153/255, 29/255)) +
+             scale_color_manual(values = c('steelblue', 'orangered')) +
+             coord_flip() +
+             theme_bw()
+  print(p)
+
+    return(list(lSel = lSel, zSel = zSel, stabPlus = stabPlus, stabMinus = stabMinus))
+}
+
+# implemented for extraction of values only - not to be generalized/used for general purposes
+getStability <- function(B, X, min.stab = 0.7) {
+  #compute stability and z-scores
+	n <- nrow(B)
+	l <- list()
+	for(i in seq_len(n))
+		l[[i]] <- as.vector(B[ i, ,])
+	names(l) <- colnames(X)
+	stab     <- lapply(l, function(x) sum(x!=0))
+	stab     <- unlist(stab) / prod(dim(B)[2 : 3])
+	z        <- unlist(lapply(l, mean)) / unlist(lapply(l, sd))
+
+	#select stable features, order by stability
+  sel     <- which(stab >= min.stab)
+  sel     <- sel[order(stab[sel], decreasing = TRUE)]
+	stabSel <- stab[sel]
+	lSel    <- l[sel]
+	zSel    <- z[sel]
+
+	stabPlus  <- stabSel[zSel > 0]
+	stabMinus <- stabSel[zSel < 0]
+
+	l          <- list(plus = stabPlus, minus = -1 * stabMinus)
+	df         <- reshape2::melt(l)
+	l_names    <- c(names(stabPlus), names(stabMinus))
+	df$feature <- l_names
+	df         <- df[, c('feature', 'value')] %>%
+	  as_data_frame()
+
+  return(df)
+}
+```
+
+
+## Introduction
+
+This notebook can be used to reproduce Figures X, Y and Z from [Leemans et al. 2018](https://www.biorxiv.org/content/early/2018/11/06/464081). An HTML report can be generated using the [`knitr`](https://yihui.name/knitr/) package (see [kbroman.org](https://kbroman.org/knitr_knutshell/pages/Rmarkdown.html) for more information).
+
+
+## Results
+
+```{r color palette}
+col_pal <- c('Escaper'   = rgb(254/255, 166/255, 41/255),
+             'Repressed' = rgb(160/255, 37/255, 237/255))
+```
+
+```{r load feature matrix}
+# load df `X` (feature matrix),
+# numeric `y` (response: barcode expr)
+# `lad_vec` (logical vector, lad/ilad integration)
+
+load(here('../data/cl20181013_feature_set_trip.Rdata'))
+
+# remove incomplete cases
+idx_mv    <- which(complete.cases(X_dt) == FALSE)
+
+X_dt      <- X
+X         <- X[-idx_mv, ]
+X_dt      <- X_dt[-idx_mv, ]
+y         <- y[-idx_mv]
+lad_vec   <- lad_vec[-idx_mv]
+
+# compute model matrix, encode promoter class as a dummy
+f         <- as.formula( ~ . + class:LMNB1_DamID + 0)
+X         <- model.matrix(f, X_dt)
+
+# remove promoter name from feature matrix
+X         <- X[, -grep(c('prom_name'), colnames(X))]
+
+# index vector of LAD integrations
+in_lad    <- which(lad_vec == 'LAD')
+out_lad   <- which(lad_vec == 'iLAD')
+
+X_local   <- X[, grep(c('mean|DamID$'), colnames(X))]
+X_nearest <- X[, -grep(c('mean|DamID$|class'), colnames(X))]
+
+# define indices of each promoter
+# repressed
+idx_adamts1  <- which(X_dt$prom_name == 'ADAMTS1')
+idx_arhgef9  <- which(X_dt$prom_name == 'ARHGEF9')
+idx_brinp1   <- which(X_dt$prom_name == 'BRINP1')
+
+#escapers
+idx_med30    <- which(X_dt$prom_name == 'MED30')
+idx_tmem106b <- which(X_dt$prom_name == 'TMEM106B')
+idx_znf300   <- which(X_dt$prom_name == 'ZNF300')
+```
+
+
+### Figure 5 (main): barcode integrations in LADs
+
+**Notes**
+
+* All LAD integrations for the same promoter class (escaper, repressed) are pooled
+
+```{r fit lasso esc repr lad, fig.width = 8, fig.height = 6, fig.keep = 'none'}
+# define indices of repressed and escapers in LADs
+idx_repr_lad <- intersect(in_lad, c(idx_arhgef9, idx_adamts1, idx_brinp1))
+idx_esc_lad  <- intersect(in_lad, c(idx_med30, idx_tmem106b, idx_znf300))
+
+X_repr_lad  <- X[idx_repr_lad, -grep('class', colnames(X))]
+X_esc_lad   <- X[idx_esc_lad, -grep('class', colnames(X))]
+
+# fit models
+fit_repr_lad <- fitLasso(X_repr_lad,
+                     y[idx_repr_lad],
+                     mode = 'regression',
+                     prop.train = 0.8,
+                     lambda.crit = 'se',
+                     n.models = 100,
+                     n.folds = 10,
+                     n.boot = 1e3,
+                     feature.imp = TRUE,
+                     parallel = TRUE,
+                     n.cores = 12)
+
+fit_esc_lad <- fitLasso(X_esc_lad,
+                     y[idx_esc_lad],
+                     mode = 'regression',
+                     prop.train = 0.8,
+                     lambda.crit = 'se',
+                     n.models = 100,
+                     n.folds = 10,
+                     n.boot = 1e3,
+                     feature.imp = TRUE,
+                     parallel = TRUE,
+                     n.cores = 12)
+```
+
+```{r figure 5a}
+tib <- tibble('Escaper'   = fit_esc_lad$perf,
+              'Repressed' = fit_repr_lad$perf) %>%
+      gather(key = 'promoter', value = 'acc')
+
+panel_5a <- tib %>%
+  ggplot(aes(x = promoter, y = acc ^ 2)) +
+    geom_boxplot() +
+    geom_beeswarm(aes(color = promoter), dodge.width = 0, cex = 2, size = 2, alpha = 0.5) +
+    scale_color_manual(values = col_pal) +
+    labs(x = NULL, y = 'R^2') +
+    theme_bw() +
+    theme(axis.title   = element_text(size = 14),
+          plot.caption = element_text(size = 14),
+          axis.text    = element_text(size = 13),
+          legend.position = 'none')
+```
+
+```{r figure 5b}
+df_repr_lad <- getStability(fit_repr_lad$B, fit_repr_lad$X, min.stab = 0)
+df_esc_lad  <- getStability(fit_esc_lad$B, fit_esc_lad$X, min.stab = 0)
+
+tib <- left_join(df_repr_lad, df_esc_lad, by = 'feature', suffix = c('_Repressed', '_Escaper')) %>%
+  gather(... = -feature, key = 'class', value = 'stability') %>%
+  mutate(class = str_replace(class, 'value_', ''))
+
+panel_5b <- tib %>%
+  group_by(feature) %>%
+  # filter for min stab in either condition
+  filter(any(abs(stability) > 0.7)) %>%
+  ungroup %>%
+  # sort by decreasing stab
+  mutate(feature = factor(feature, levels = unique(feature[order(stability, decreasing = TRUE)]))) %>%
+  ggplot(aes(feature, stability, fill = class)) +
+    geom_bar(position = 'dodge', stat = 'identity') +
+    scale_fill_manual(values = col_pal) +
+    labs(x = NULL, y = 'signed stability') +
+    coord_flip() +
+    theme_bw() +
+    theme(axis.text.x  = element_text(angle = 90, hjust = 1),
+          axis.title   = element_text(size = 15),
+          axis.text    = element_text(size = 11),
+          legend.text  = element_text(size = 12),
+          legend.title = element_text(size = 14))
+```
+
+```{r combine panels into figure main, fig.width = 8, fig.height = 5}
+ggdraw() +
+  draw_plot(panel_5a, x = 0, y = 0, width = 0.4, height = 1) +
+  draw_plot(panel_5b, x = 0.4, y = 0, width = 0.6, height = 1) +
+  draw_plot_label(c("A", "B"), c(0, 0.4), c(1, 1), size = 16)
+```
+
+#### Basic statistics
+
+```{r basic stats lad, message = TRUE}
+message('Number of features considered')
+ncol(X_repr_lad)
+
+message('Mean R^2 - escapers (n=100)')
+mean(fit_esc_lad$perf ^ 2)
+message('s.d. R^2 - escapers (n=100)')
+sd(fit_esc_lad$perf ^ 2)
+
+message('Mean R^2 - repressed (n=100)')
+mean(fit_repr_lad$perf ^ 2)
+message('s.d. R^2 - repressed (n=100)')
+sd(fit_repr_lad$perf ^ 2)
+
+message('Wilcoxon rank sum test summary (R^2 escapers vs repressed')
+(w_test <- wilcox.test(fit_esc_lad$perf, fit_repr_lad$perf))
+w_test$p.value
+```
+
+#### Two-proportions z-test (Figure 5B)
+
+```{r figure 5b two prop test}
+df <- left_join(df_repr_lad, df_esc_lad, by = 'feature', suffix = c('_repr', '_esc')) %>%
+  group_by(feature) %>%
+  # filter for min stab in either condition
+  filter(any(abs(value_repr) > 0.7 | abs(value_esc) > 0.7)) %>%
+  ungroup() %>%
+  mutate(value_repr = round(abs(value_repr) * 1e3),
+         value_esc  = round(abs(value_esc) * 1e3))
+
+l_test <- apply(df, 1, function(x) prop.test(x = c(as.numeric(x['value_repr']), as.numeric(x['value_esc'])), n = c(1e3, 1e3)))
+names(l_test) <- df[['feature']]
+
+l_test
+
+l_test_pval <- apply(df, 1, function(x) prop.test(x = c(as.numeric(x['value_repr']), as.numeric(x['value_esc'])), n = c(1e3, 1e3))$p.value)
+names(l_test_pval) <- df[['feature']]
+```
+
+
+### Figure S5 (supplemental figure): barcode integrations in iLADs
+
+**Notes**
+
+* All iLAD integrations for the same promoter class (escaper, repressed) are pooled
+
+```{r fit lasso esc repr ilad, fig.width = 8, fig.height = 6, echo = FALSE, fig.keep='none'}
+# define indices of repressed and escapers in LADs
+idx_repr_ilad <- intersect(out_lad, c(idx_arhgef9, idx_adamts1, idx_brinp1))
+idx_esc_ilad  <- intersect(out_lad, c(idx_med30, idx_tmem106b, idx_znf300))
+
+X_repr_ilad  <- X[idx_repr_ilad, -grep('class', colnames(X))]
+X_esc_ilad   <- X[idx_esc_ilad, -grep('class', colnames(X))]
+
+# fit models
+fit_repr_ilad <- fitLasso(X_repr_ilad,
+                     y[idx_repr_ilad],
+                     mode = 'regression',
+                     prop.train = 0.8,
+                     lambda.crit = 'se',
+                     n.models = 100,
+                     n.folds = 10,
+                     n.boot = 1e3,
+                     feature.imp = TRUE,
+                     parallel = TRUE,
+                     n.cores = 12)
+
+fit_esc_ilad <- fitLasso(X_esc_ilad,
+                     y[idx_esc_ilad],
+                     mode = 'regression',
+                     prop.train = 0.8,
+                     lambda.crit = 'se',
+                     n.models = 100,
+                     n.folds = 10,
+                     n.boot = 1e3,
+                     feature.imp = TRUE,
+                     parallel = TRUE,
+                     n.cores = 12)
+```
+
+```{r figure s5a}
+tib <- tibble('Escaper'   = fit_esc_ilad$perf,
+              'Repressed' = fit_repr_ilad$perf) %>%
+      gather(key = 'promoter', value = 'acc')
+
+panel_s5a <- tib %>%
+  ggplot(aes(x = promoter, y = acc ^ 2)) +
+    geom_boxplot() +
+    geom_beeswarm(aes(color = promoter), dodge.width = 0, cex = 2, size = 2, alpha = 0.5) +
+    scale_color_manual(values = col_pal) +
+    labs(x = NULL, y = 'R^2') +
+    theme_bw() +
+    theme(axis.title   = element_text(size = 14),
+          plot.caption = element_text(size = 14),
+          axis.text    = element_text(size = 13),
+          legend.position = 'none')
+```
+
+```{r generate figure s5a, fig.width = 8, fig.height = 5}
+ggdraw() +
+  draw_plot(panel_s5a, x = 0, y = 0, width = 0.4, height = 1) +
+  draw_plot_label(c("A"), c(0), c(1), size = 16)
+```
+
+#### Basic statistics
+
+```{r basic stats ilad, message = TRUE}
+message('Number of features considered')
+ncol(X_repr_ilad)
+
+message('Mean R^2 - escapers (n=100)')
+mean(fit_esc_ilad$perf ^ 2)
+message('s.d. R^2 - escapers (n=100)')
+sd(fit_esc_ilad$perf ^ 2)
+
+message('Mean R^2 - repressed (n=100)')
+mean(fit_repr_ilad$perf ^ 2)
+message('s.d. R^2 - repressed (n=100)')
+sd(fit_repr_ilad$perf ^ 2)
+
+message('Wilcoxon rank sum test summary (R^2 escapers vs repressed')
+(w_test <- wilcox.test(fit_esc_ilad$perf, fit_repr_ilad$perf))
+w_test$p.value
+```
+
+
+## Session Info
+
+```{r}
+devtools::session_info()
+```
