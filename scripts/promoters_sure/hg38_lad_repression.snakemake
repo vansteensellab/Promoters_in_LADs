@@ -1,0 +1,407 @@
+import os
+import inspect
+import re
+
+filename = inspect.getframeinfo(inspect.currentframe()).filename
+path = os.path.dirname(os.path.abspath(filename))
+
+def get_wildcard_input(config, key, wildcard):
+    return("%s/%s" % (config['input'],
+                      config[key][wildcard]))
+
+def get_domain_out(config):
+    for cell_type in config["domains"].keys():
+        for domain in config["domains"][cell_type].keys():
+            yield("{outdir}/domains/{name}_%s_%s.txt" % (cell_type, domain))
+
+def get_domain_label(config):
+    for cell_type in config["domains"].keys():
+        for domain in config["domains"][cell_type].keys():
+            yield("%s_%s" % (cell_type, domain))
+
+rule all:
+    input:
+        expand("{outdir}/window/{name}_{signal}_window_{a}_{b}_{bs}.txt.gz",
+               outdir=config['outdir'],
+               name=list(config["transcripts"].keys()),
+               signal=config["tss_window"].keys(),
+               a=config['window_param']['a'],
+               b=config['window_param']['b'],
+               bs=config['window_param']['bs']),
+        expand("{outdir}/window/{name}_{signal}_scaled-window.txt.gz",
+               outdir=config['outdir'],
+               name=list(config["transcripts"].keys()),
+               signal=config["scaled_window"].keys()),
+        expand("{outdir}/expression/{name}_stranded_expression.txt.gz",
+               outdir=config['outdir'],
+               name=list(config["transcripts"].keys()) +
+                    list(config["enhancers"].keys()) +
+                    list(config["dnase"].keys())),
+        expand("{outdir}/domains/{name}_domains.txt",
+               outdir=config['outdir'],
+               name=list(config["transcripts"].keys()) +
+                    list(config["enhancers"].keys()) +
+                    list(config["dnase"].keys())),
+        expand("{outdir}/tssr_gene_body/{name}_tssr.bed",
+               outdir=config['outdir'],
+               name=list(config["transcripts"].keys())),
+
+## get a bed file centered around a selection (used for enhancers)
+rule center_region:
+    input:
+        '{outdir}/selection/{name}_selection.txt'
+    output:
+        '{outdir}/tssr_gene_body/{name}_center.bed'
+    shell:
+        "awk -vOFS='\t' '{{print $1, $2-150, $2+150, $3}}' {input} > {output}"
+
+## get multiple bed files:
+## [selection]_tssr.bed: region around the TSS (-50:+300)
+## [selection]_1kb.bed: 500bp up and down from TSS.
+## [selection]_gene_body.bed: gene body TSS +300 until the end of the gene
+rule tssr_gene_body:
+    input:
+        bed='{outdir}/selection/{name}_fantom_selection.bed'
+    output:
+        tss='{outdir}/tssr_gene_body/{name}_tssr.bed',
+        kb='{outdir}/tssr_gene_body/{name}_1kb.bed',
+        body='{outdir}/tssr_gene_body/{name}_gene_body.bed'
+    shell:
+        "{path}/scripts/body_tss_bed.awk -vtss={output.tss}"
+        "                                -vbody={output.body}"
+        "                                -vkb={output.kb}"
+        "                                -vtssr_start='-50'"
+        "                                -vtssr_end='300'"
+        "                                -vbody_start='300'"
+        "                                -vbody_end='0'"
+        "                                {input.bed}"
+
+
+## mask is used for plots with average signal along a region of interest
+## to mask the signal coming from nearby annotations. Average is calculated
+## from the remaining data points at each time-point.
+rule mask_regions:
+    input:
+        lambda wildcards: "%s/%s" % (config["input"],
+                                     config["transcripts"][wildcards.name]),
+        config['chrom_sizes']
+    output:
+        '{outdir}/window/{name}_mask.txt'
+    shell:
+        "{path}/scripts/region_mask.R {input} {output}"
+
+
+## join the domain calls in one file
+rule domain_join:
+    input:
+        get_domain_out(config)
+    output:
+        "{outdir}/domains/{name}_domains.txt"
+    run:
+        label_list = [re.search('.*_(.*_.*).txt', f).groups()[0]
+                      for f in input]
+        header = '\t'.join(["ID"] + label_list)
+        join_cmd = "join -t $'\\t' {input[0]} {input[1]}"
+        if len(input) > 2:
+            for i in range(2, len(input)):
+                join_cmd = ' | '.join((join_cmd,
+                                       "join -t $'\\t' - {input[%s]}" % (i)))
+        header_cmd = "echo '%s' > {output} ;" % header
+        shell(' '.join((header_cmd, join_cmd, ">> {output}")))
+
+rule domain:
+    input:
+        lambda wildcards: "%s/%s" % (config['domain_dir'],
+                                     config['domains'][wildcards.cell_type]
+                                           [wildcards.domain]),
+        bed=lambda wildcards: get_bed(config, wildcards)
+    output:
+        "{outdir}/domains/{name}_{cell_type}_{domain}.txt"
+    params:
+        adjust=5000
+    message:
+        "calling binary {wildcards.domain} state of TSS. "
+        "Complete gene within {wildcards.domain} regions, more than "
+        "{params.adjust}bp from the border are 1, others 0."
+    shell:
+        "bedtools intersect -f 1 -c -a {input.bed} "
+        "                   -b <(zcat {input[0]} | awk -vOFS='\\t' '{{"
+        "                            if ($3-$2 > {params.adjust}){{"
+        "                               print $1, $2 + {params.adjust},"
+        "                                      $3 - {params.adjust}"
+        "                        }}}}') | "
+        "awk -vOFS='\\t' '{{print $4, $7}}' > {output}"
+
+def get_bed(config, wildcards):
+    if wildcards.name in config['transcripts'].keys():
+        return('%s/selection/%s_fantom_selection.bed' % (wildcards.outdir,
+                                                         wildcards.name))
+    else:
+        return('%s/selection/%s_selection.bed' % (wildcards.outdir,
+                                                  wildcards.name))
+
+rule scaled_matrix:
+    input:
+        window=lambda wildcards: config['scaled_window'][wildcards.signal],
+        bed=lambda wildcards: get_bed(config, wildcards)
+    output:
+        '{outdir}/window/{name}_{signal}_scaled-window.txt.gz'
+    message:
+        "extracting matrix of {params.type} {wildcards.signal} signal {params.up}bp "
+        "upstream and {params.down}bp downstream of {wildcards.name} TSS's "
+        "in bins of {params.binsize}bp."
+    params:
+        binsize=config['scaled_param']['bs'],
+        up=config['scaled_param']['b'],
+        down=config['scaled_param']['a'],
+        unscaled3=config['scaled_param']['unscaled3'],
+        unscaled5=config['scaled_param']['unscaled5'],
+        body_length=config['scaled_param']['body_length'],
+        missingDataAsZero=lambda wildcards: config['missingDataAsZero'][wildcards.signal],
+        type=lambda wildcards: config['window_type'][wildcards.signal]
+    threads:
+        10
+    run:
+        cmd = ("computeMatrix scale-regions -S {input.window} "
+               "                            -R {input.bed} "
+               "                            -p {threads}"
+               "                            --sortRegions keep"
+               "                            --averageTypeBins {params.type}"
+               "                            --binSize={params.binsize}"
+               "                            -a {params.down} -b {params.up} "
+               "                            --unscaled3prime {params.unscaled3}"
+               "                            --unscaled5prime {params.unscaled5}"
+               "                            -m {params.body_length}"
+               "                            --outFileName {output}")
+        if params.missingDataAsZero:
+            cmd = ' '.join((cmd, '--missingDataAsZero'))
+        shell(cmd)
+
+
+
+rule compute_matrix:
+    input:
+        window=lambda wildcards: config['tss_window'][wildcards.signal],
+        bed=lambda wildcards: get_bed(config, wildcards)
+    output:
+        '{outdir}/window/{name}_{signal}_window_{up}_{down}_{binsize}.txt.gz'
+    message:
+        "extracting matrix of {params.type} {wildcards.signal} signal {wildcards.up}bp "
+        "upstream and {wildcards.down}bp downstream of {wildcards.name} TSS's "
+        "in bins of {wildcards.binsize}bp."
+    params:
+        binsize='{binsize}',
+        up='{up}',
+        down='{down}',
+        missingDataAsZero=lambda wildcards: config['missingDataAsZero'][wildcards.signal],
+        type=lambda wildcards: config['window_type'][wildcards.signal]
+    threads:
+        10
+    run:
+        if params.type == 'sum':
+            cmd = ("computeMatrix reference-point -S {input.window} "
+                   "                              -R {input.bed} "
+                   "                              -p {threads}"
+                   "                              --averageTypeBins sum"
+                   "                              --binSize={params.binsize}"
+                   "                              -a {params.down} -b {params.up} "
+                   "                              --outFileName {output}")
+        elif params.type == 'mean':
+            cmd = ("computeMatrix reference-point -S {input.window} "
+                   "                              -R {input.bed} "
+                   "                              -p {threads}"
+                   "                              --binSize={params.binsize}"
+                   "                              -a {params.down} -b {params.up} "
+                   "                              --outFileName {output}")
+        if params.missingDataAsZero:
+            cmd = ' '.join((cmd, '--missingDataAsZero'))
+        shell(cmd)
+
+
+
+
+## sum counts around TSS's for stranded expression files (e.g. SuRE and GROcap)
+def get_stranded_input(config, wildcards):
+    for key in config['expression']:
+        file_dict = config['expression'][key]
+        for strand in file_dict:
+            yield('%s/%s' % (config['input'], file_dict[strand]))
+
+def get_stranded_labels(config, wildcards):
+    for key in config['expression']:
+        file_dict = config['expression'][key]
+        for strand in file_dict:
+            yield('%s_%s' % (key, strand))
+
+def get_stranded_tss(config, wildcards):
+    if wildcards.name in config['transcripts']:
+        return("%s/selection/%s_fantom_selection.txt" % (wildcards.outdir,
+                                                         wildcards.name))
+    else:
+        return("%s/selection/%s_selection.txt" % (wildcards.outdir,
+                                                  wildcards.name))
+
+rule tss_gff_selection:
+    input:
+        tss=lambda wildcards: get_stranded_tss(config, wildcards),
+        gff=lambda wildcards: "%s/%s" % (config["input"],
+                                         config["transcripts"][wildcards.name])
+    output: "{outdir}/{name}_selection.bed15"
+    shell:
+        "{path}/scripts/gff_selection.R -t {input.tss} -g {input.gff} -c 3 "
+        "                               -o {output}"
+
+rule tss_stranded_expression:
+    input:
+        tss=lambda wildcards: get_stranded_tss(config, wildcards),
+        bw=lambda wildcards: list(get_stranded_input(config, wildcards))
+    output:
+        bed=temp("{outdir}/expression/{name, [^_]+}_stranded_expression.bed"),
+        npz=temp("{outdir}/expression/{name, [^_]+}_stranded_expression.npz"),
+        tab=temp("{outdir}/expression/{name, [^_]+}_stranded_expression.tab.gz"),
+        out="{outdir}/expression/{name, [^_]+}_stranded_expression.txt.gz"
+    params:
+        up=500,
+        down=500,
+        labels=lambda wildcards:list(get_stranded_labels(config, wildcards))
+    threads:
+        10
+    message:
+        "calculating mean expression {params.up}bp upstream and {params.down}bp "
+        "downstream of {wildcards.name} TSS's and separating by sense/antisense"
+    shell:
+        "{path}/scripts/bed_region.sh -t {input.tss} -u {params.up} "
+        "                             -d {params.down} > {output.bed} ; "
+        "multiBigwigSummary BED-file -b {input.bw} --BED {output.bed} "
+        "                            -p {threads} -l {params.labels} "
+        "                            -out {output.npz} "
+        "                            --outRawCounts {output.tab}; "
+        "{path}/scripts/region_to_id.awk {output.tab} {output.bed} > {output.out}"
+
+
+rule report_tss_selection:
+    input:
+        lambda wildcards: get_wildcard_input(config, 'transcripts',
+                                             wildcards.name),
+        tss="{outdir}/selection/{name}_{g_exp}_tss.txt",
+        exp="{outdir}/selection/{name}_{g_exp}_tissue_expr.txt.gz",
+        report="%s/scripts/report_tss_selection.Rmd" % (path),
+    output:
+        html="{outdir}/report/{name}_{g_exp}_selection.html",
+        txt="{outdir}/selection/{name}_{g_exp}_selection.txt",
+        gff="{outdir}/selection/{name}_{g_exp}_selection.gff",
+        bed="{outdir}/selection/{name}_{g_exp}_selection.bed"
+    shell:
+        "{path}/scripts/make_report.R {input.report} {output.html} "
+        "                             {input.tss} {input.exp} {input[0]} "
+        "                             {output.txt} {output.gff} {output.bed}"
+
+
+
+## If TSS's are closer together, let's take the TSS that is generally most
+## highly transcribed. For this we will need to have some information on
+## transcription rates across fantom5 dataset.
+## might as well also count the number of tissues expressed, since this will
+## be used later.
+
+
+rule tss_global_expression:
+    input:
+        link="{outdir}/selection/{name}_{g_exp}_link.txt",
+        exp="%s/%s" % (config["input"], config["tissue_expression"])
+    output:
+        "{outdir}/selection/{name}_{g_exp}_tissue_expr.txt.gz"
+    message:
+        "calculating sum of expression normalized over input for each tss "
+        "in {wildcards.name} (used to select high expressing TSS's) and "
+        "counting number of samples with > 0 expression"
+    shell:
+        "{path}/scripts/tss_fantom_expression.sh -l {input.link} "
+        "                                        -e {input.exp} > {output}"
+
+
+
+## For multiple transcripts coming from the same gene, we want to select
+## transcription start sites at least 500bp apart.
+
+## select unique transcript start sites which overlap with a cage peak.
+## CAGE peaks have at least 1 transcript in one of the tissues.
+## (multiple transcripts of same gene can start at same position we don't
+## want those).
+
+rule tss_exp_selection:
+    input:
+        tss="{outdir}/raw_data/{name}_tss.bed.gz",
+        exp=lambda wildcards:
+                "%s/%s" % (config["input"],
+                           config["transcript_selection"][wildcards.g_exp])
+    output:
+        selection="{outdir}/selection/{name}_{g_exp}_tss.txt",
+        link="{outdir}/selection/{name}_{g_exp}_link.txt"
+    params:
+        dist=50
+    message:
+        "selecting {wildcards.name} transcription start sites which are <  "
+        "{params.dist}bp away from peaks in {wildcards.g_exp} and "
+        "writing table linking identifiers."
+    shell:
+        "{path}/scripts/tss_exp_selection_overlap.sh -t {input.tss} "
+        "                                            -d {params.dist} "
+        "                                            -e {input.exp} "
+        "                                            -s {output.selection} "
+        "                                            -l {output.link}"
+
+
+
+## select all transcript start sites from gff
+rule gff_to_tss_bed:
+    input:
+        lambda wildcards: "%s/%s" % (config["input"],
+                                     config["transcripts"][wildcards.name])
+    output:
+        "{outdir}/raw_data/{name}_tss.bed.gz"
+    message:
+        "selecting all transcription start sites from {input}"
+    shell:
+        "{path}/scripts/gff_to_tss_bed.sh {input} > {output}"
+
+
+rule dnase_refpoint:
+    input:
+        lambda wildcards: get_refpoint(config, "dnase.%s" % (wildcards.group))
+    output:
+        txt="{outdir}/selection/dnase.{group, [^_]+}_selection.txt",
+        bed="{outdir}/selection/dnase.{group, [^_]+}_selection.bed"
+    shell:
+        "zcat {input} | "
+        "    tail -n+2 | "
+        "    awk -vOFS='\t' -vtxt={output.txt} -vbed={output.bed} -F'\t|;' '{{"
+        "        centre=int(($2 + $3) / 2);"
+        "        print $1, $2, $3, $1\":\"centre, \"0\", \".\" > bed;"
+        "        print $1, centre, $1\":\"centre > txt}}'"
+
+ruleorder: dnase_refpoint > genehancer_refpoint
+
+def get_refpoint(config, name):
+    if name in config["enhancers"]:
+        return("%s/%s" % (config["input"],
+                          config["enhancers"][name]))
+    elif name in config["dnase"]:
+        return("%s/%s" % (config["input"],
+                          config["dnase"][name]))
+
+
+rule genehancer_refpoint:
+    input:
+        lambda wildcards: get_refpoint(config, wildcards.enh)
+    output:
+        txt="{outdir}/selection/{enh, [^_]+}_selection.txt",
+        bed="{outdir}/selection/{enh, [^_]+}_selection.bed"
+    shell:
+        "zcat {input} | "
+        "    tail -n+2 | "
+        "    awk -vOFS='\t' -vtxt={output.txt} -vbed={output.bed} -F'\t|;' '{{"
+        "        gsub(\"genehancer_id=\", \"\", $9);"
+        "        print $1, $4 - 1, $5, $9, $6, \".\" > bed;"
+        "        centre=int(($4 + $5) / 2);"
+        "        print $1, centre, $9 > txt}}'"

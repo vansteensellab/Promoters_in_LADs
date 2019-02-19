@@ -1,0 +1,293 @@
+#!/usr/bin/perl
+
+##========================================================================
+##
+## Author: Joshua Starmer <josh.starmer@gmail.com>, 2015
+## 
+## Copyright (C) 2015, Joshua Starmer
+##
+## This program is free software; you can redistribute it and/or
+## modify it under the terms of the GNU General Public License
+## as published by the Free Software Foundation; either version 2
+## of the License, or (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+## 
+##========================================================================
+
+use strict;
+use warnings;
+
+use Getopt::Std;
+
+use constant TRUE  => 1;
+use constant FALSE => 0;
+
+use constant SAM_CHR  => 2;
+use constant SAM_POS  => 3;
+use constant SAM_QUAL => 4;
+use constant SAM_SEQ  => 9;
+
+use constant BED_CHR => 0;
+use constant BED_POS => 1;
+
+my $sHelp = <<END_OF_HELP;
+
+Usage: hiddenDomains [options] -g ChromInfo -t TreatmentReads -o OutputPrefix
+
+Options
+
+-h
+    Print this help information.
+
+-b  BIN_WIDTH
+    The width of the bin. Default is 1000bp.
+
+-B
+    The input file(s) is(are) in BED format (the default is BAM). NOTE: All
+    read files have to have to same format (either BED or BAM). Use
+    binReads.pl as a stand alone program if you have a more complicated set up.
+
+-c  ControlReads
+    A BED or BAM file that contains aligned read reads. Use the -B option to
+    speicfy BED format. BAM format is the default.
+
+-C  ControlReadsBins
+    If you have already binned your control reads, you can pass them in
+    with this option and they will be used directly.
+
+-g  ChromInfo.txt
+    If you get an out of bounds error when uploading a bed file to the UCSC
+    genome browser, you can use this option to trim the bounds to the size of 
+    the chromosomes.
+    ChromInfo.txt should be a tab delimited file with the chromosome names
+    in the first column and their sizes in the second column.  Here is an 
+    example ChromInfo.txt file for a genome with 3 chromosomes:
+
+    chr1    197195432
+    chr2    181748087
+    chr3    159599783    
+
+-o  OutputPrefix
+    hiddenDomains generates four or five files with names that start with
+    OutputPrefix. 
+    
+    1) "_domains.txt": A text file with all of the enriched domains and
+    posterior probabilities.
+    2) "_vis.bed": A BED file for visualization, which contains one line per 
+    significantly enriched bin - this allows for color coding based on the 
+    posterior probability.
+    3) "_analysis.bed": The second BED file is for analysis, and this merges 
+    all consecutive bins with posterior probabiliites greater than 
+    MIN_POSTERIOR (as specified with the -p option) or the default value, 
+    0 - which merges all consecutive significat bins.
+    4) "_treatment_bins.txt": A file with the read counts per bin.
+    5) "_control_bins.txt": A file with the read counts per bin.
+
+-p  MIN_POSTERIOR
+    Toss out parts of domains that have posterior values that are less
+    than MIN_POSTERIOR. You can set this to any value you want, but for
+    reference, domainsToBed bins according the following scale:
+    >= 0.9
+    0.9 > posterior >= 0.8
+    0.8 > posterior >= 0.7
+    0.7 > posterior >= min posterior for significance
+
+    The default value is 0; everything is merged by default.
+
+-q  MIN_MAPQ
+    The minimum MAPQ score. Default is 30.
+
+-t  TreatmentReads
+    A BED or BAM file that contains aligned read reads. Use the -B option to
+    speicfy BED format. BAM format is the default.
+    
+
+END_OF_HELP
+
+if (-t STDIN && !@ARGV) {
+    print STDERR $sHelp;
+    exit 1;
+}
+
+my $path = $0;
+chomp($path);
+$path =~ s/hiddenDomains\Z//;
+#print STDERR $path."\n";
+
+
+# process the command line arguments
+my %opts; # a hash table to store file names passed in as agruments
+getopts('hb:Bc:C:g:o:p:t:q:', \%opts);
+
+if ($opts{'h'}) { # print help and exit
+    print STDERR $sHelp;
+    exit 1;
+}
+
+my $binWidth = 1000;
+if (defined($opts{'b'})) {
+    $binWidth = $opts{'b'};
+}
+print STDERR "binWidth: ".$binWidth." (change with -b option)\n";
+
+my $isBedFile = FALSE;
+if(defined($opts{'B'})) {
+    $isBedFile = TRUE;
+}
+
+my $minQualScore = 30;
+if (defined($opts{'q'})) {
+    $minQualScore = $opts{'q'};
+}
+print STDERR "minQualScore: ".$minQualScore." (change with -q option)\n";
+
+my $chrFile = "";
+my %chrSizes;
+my $chrString;
+my $rChrList;
+if (defined($opts{'g'})) {
+    $chrFile = $opts{'g'};
+    
+    print STDERR "Reading in chromosome sizes from: $chrFile\n";
+    
+    open(FILE, "<".$chrFile) || die("Could not open $chrFile $!\n");
+    while(my $line = <FILE>) {
+	chomp($line);
+        my ($chr, $size) = split(/\t/, $line);
+        $chrSizes{$chr} = $size;
+        if (defined($chrString)) {
+            $chrString .= " ".$chr;
+	    $rChrList .= ", \"".$chr."\"";
+        } else {
+            $chrString = "\"".$chr;
+	    $rChrList = "c(\"".$chr."\"";
+        }
+    }
+} else {
+    print STDERR "\nYou must specify -g ChromInfo.txt\n\n";
+    print STDERR $sHelp;
+    exit 1;
+}
+$chrString .= "\"";
+$rChrList .= ")";
+
+my $minPost = 0;
+if (defined($opts{'p'})) {
+    $minPost = $opts{'p'};
+}
+
+my $controlFile;
+if (defined($opts{'c'})) {
+    $controlFile = $opts{'c'}
+}
+my $controlBinFile;
+if (defined($opts{'C'})) {
+    $controlBinFile = $opts{'C'}
+}
+
+my $outputPrefix;
+if (defined($opts{'o'})) {
+    $outputPrefix = $opts{'o'};
+} else {
+    print STDERR "\nYou must specify -o OutputPrefix\n\n";
+    print STDERR $sHelp;
+    exit 1;
+}
+
+my $treatmentFile;
+if (defined($opts{'t'})) {
+    $treatmentFile = $opts{'t'};
+} else {
+    print STDERR "\nYou must specify -t TreatmentFile\n\n";
+    print STDERR $sHelp;
+    exit 1;
+}
+
+###############################################################################
+##
+## bin the reads
+##
+###############################################################################
+
+## build the options string for binReads.pl
+my $optString = "-b ".$binWidth." -q ".$minQualScore." -c ".$chrString;
+#print STDERR $optString."\n";
+#exit;
+#my $optString = "-b ".$binWidth." -q ".$minQualScore;
+
+if ($isBedFile) {
+    $optString .= " -B"
+}
+
+print STDERR "binning reads in: ".$treatmentFile."\n";
+my $treatmentBinFile = $outputPrefix."_treatment_bins.txt";
+my $commandString = $path."binReads.pl $optString $treatmentFile > $treatmentBinFile";
+`$commandString`;
+print STDERR $commandString."\n";
+#`binReads.pl $optString $treatmentFile > $treatmentBinFile`;
+print STDERR "finished binning reads in: ".$treatmentFile."\n";
+
+if (defined($controlFile)) {
+    print STDERR "binning reads in: ".$controlFile."\n";
+    $controlBinFile = $outputPrefix."_control_bins.txt";
+    $commandString = $path."binReads.pl $optString $controlFile > $controlBinFile";
+    #`$binReads.pl $optString $controlFile > $controlBinFile`;
+    `$commandString`;
+    print STDERR "finished binning reads in: ".$controlFile."\n";
+}
+
+
+###############################################################################
+##
+## look for domains!
+##
+###############################################################################
+print STDERR "\nStarting search for enriched domains!\n\n";
+my $domainFile = $outputPrefix."_domains.txt";
+
+#print STDERR $rChrList."\n";
+#print STDERR $treatmentBinFile."\n";
+#print STDERR $controlBinFile."\n";
+#print STDERR $domainFile."\n";
+#print STDERR $chrFile."\n";
+
+
+
+if (defined($controlFile)) {
+    my @RscriptArgs = ("Rscript", $path."run_hiddenDomains.R", $treatmentBinFile, $controlBinFile, , $domainFile, $chrFile, $path);
+    system(@RscriptArgs);
+} else {
+    my @RscriptArgs = ("Rscript", $path."run_hiddenDomains_no_control.R", $treatmentBinFile, "NULL", , $domainFile, $chrFile, $path);
+    system(@RscriptArgs);
+}
+
+    
+
+###############################################################################
+##
+## create the BED files
+##
+###############################################################################
+
+print STDERR "\nCreating BED files!\n\n";
+    
+## build the options string for domainsToBed.pl
+$optString = "-t -b ".$binWidth." -g ".$chrFile;
+my $visBedFile = $outputPrefix."_vis.bed";
+print STDERR "Creating a BED file for the UCSC browser: ".$visBedFile."\n";
+`domainsToBed.pl $optString $domainFile > $visBedFile`;
+
+$optString = "-b ".$binWidth." -g ".$chrFile." -p ".$minPost;
+my $analysisBedFile = $outputPrefix."_analysis.bed";
+print STDERR "Creating a BED file for analysis: ".$analysisBedFile."\n";
+`domainsMergeToBed.pl $optString $domainFile > $analysisBedFile`;
+
+print STDERR "Hooray! All done!\n";

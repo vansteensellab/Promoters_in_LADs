@@ -1,0 +1,549 @@
+import os
+import inspect
+import glob
+
+
+filename = inspect.getframeinfo(inspect.currentframe()).filename
+chip_path = os.path.dirname(os.path.abspath(filename))
+
+
+def get_all(config):
+    regex_bw = '%s/%s/tracks/%s/%s/%s_%s_r%i_%s_fcoc.bw'
+    regex_idx = '%s/%s/idxstats/%s/%s/%s_%s.txt'
+    regex_np = '%s/%s/gff3/%s/%s/%s_%s_r%i_%s_%s.gff3'
+    for genome in config['chip_genome']:
+        for celltype in config['experiment']:
+            for experiment in config['experiment'][celltype]:
+                exp_dict = config['experiment'][celltype][experiment]
+                for target in exp_dict:
+                    target_dict = exp_dict[target]
+                    for sample in target_dict:
+                        width = target_dict[sample]['hiddendomain_width']
+                        p = target_dict[sample]['hiddendomain_p']
+                        domain = ['-'.join(('domains',str(w), str(p))) for w in width]
+                        rep_list = target_dict[sample]['treatment']
+                        for rep in range(0, len(rep_list)):
+                            yield(regex_bw % (config['chip_out'], genome,
+                                              celltype, experiment, target,
+                                              sample, rep+1, rep_list[rep]))
+
+                            for region in domain:
+                                yield(regex_np % (config['chip_out'], genome,
+                                                   celltype, experiment, target,
+                                                   sample, rep+1,
+                                                   rep_list[rep], region))
+                        yield(regex_idx % (config['chip_out'], genome, celltype,
+                                           experiment, target, sample))
+
+
+rule all_chip_align:
+    input:
+        [out_file for out_file in get_all(config)]
+
+
+
+def get_exp(config, wildcards):
+    exp_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    rep_list = exp_dict[wildcards.target][wildcards.sample]['treatment']
+    for r in range(0,len(rep_list)):
+        yield('%s/%s/filtered/%s/%s/%s_%s_r%i_%s.bam' % (wildcards.outdir,
+                                                         wildcards.genome,
+                                                         wildcards.celltype,
+                                                         wildcards.experiment,
+                                                         wildcards.target,
+                                                         wildcards.sample,
+                                                         r + 1, rep_list[r]))
+def get_ctrl_input(config, wildcards):
+    ip_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    srr_list = ip_dict[wildcards.target][wildcards.sample]['control']
+    srr_str = '_'.join(srr_list)
+    return('%s/%s/filtered/control/%s.bam' % (wildcards.outdir, wildcards.genome,
+                                              srr_str))
+
+
+rule idxstats:
+    input:
+        exp=lambda wildcards: get_exp(config, wildcards),
+        ip=lambda wildcards: get_ctrl_input(config, wildcards),
+        exp_bai=lambda wildcards: ['%s.bai' % (fname) for fname in
+                                   get_exp(config, wildcards)],
+        ip_bai=lambda wildcards: '%s.bai' % (get_ctrl_input(config, wildcards))
+    output:
+        '{outdir}/{genome}/idxstats/{celltype}/{experiment}/{target}_{sample}.txt'
+    shell:
+        "{chip_path}/scripts/idxstats.R --exp {input.exp} "
+        "                               --input {input.ip}"
+        "                               --out {output}"
+
+
+
+
+
+rule chrom_sizes:
+    input:
+        lambda wildcards: config['chrom_sizes'][wildcards.genome]
+    output:
+        "{outdir}/{genome}/chrom_sizes.txt"
+    shell:
+        "awk -vOFS='\\t' '{{if ($1!=\"\" && $1!~/chrM/){{print $1, $2}}}}' {input} > {output}"
+
+
+def convert_input(wildcards):
+    if (wildcards.region.startswith('domains')):
+        region = wildcards.region.split('-')
+        regex = '_'.join(('%s/domains/%s/%s/%s_%s_r%s_%s', region[1], region[2],
+                          'analysis.bed'))
+    else:
+        regex = '%s/peaks/%s/%s/%s_%s_r%s_%s_peaks.narrowPeak'
+    return(regex % (wildcards.outdir, wildcards.celltype, wildcards.experiment,
+                    wildcards.target, wildcards.sample, wildcards.rep,
+                    wildcards.srr_id))
+
+def get_source(wildcards):
+    if (wildcards.region=='domains'):
+        return('hiddenDomains')
+    else:
+        return('MACS2')
+
+def get_data_type(config, wildcards):
+    exp_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    return(exp_dict[wildcards.target][wildcards.sample]['SOFA'])
+
+rule convert2gff:
+    input:
+        lambda wildcards: convert_input(wildcards)
+    output:
+        '{outdir}/gff3/{celltype}/{experiment}/{target}_{sample}_r{rep}_{srr_id}_{region}.gff3'
+    params:
+        source=lambda wildcards: get_source(wildcards),
+        datatype=lambda wildcards: get_data_type(config, wildcards),
+        o=lambda wildcards: '-n' if (wildcards.region=='narrowPeak') else ''
+    shell:
+        "{chip_path}/scripts/bed2gff.sh -s {params.source} -t {params.datatype}"
+        "                               {params.o} -b {input} > {output}"
+
+
+def get_peak_rep(config, wildcards):
+    exp_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    srr_list = exp_dict[wildcards.target][wildcards.sample]['treatment']
+    if wildcards.peaktype == 'peaks':
+        regex = '%s/peaks/%s/%s/%s_%s_r%i_%s_peaks.narrowPeak'
+        for r in range(0, len(srr_list)):
+            yield(regex % (wildcards.outdir, wildcards.celltype,
+                           wildcards.experiment, wildcards.target,
+                           wildcards.sample, r + 1, srr_list[r]))
+    else:
+        regex = '%s/domains/%s/%s/%s_%s_r%i_%s_%s_%s_analysis.bed'
+        for r in range(0, len(srr_list)):
+            yield(regex % (wildcards.outdir, wildcards.celltype,
+                           wildcards.experiment, wildcards.target,
+                           wildcards.sample, r + 1, srr_list[r],
+                           wildcards.bs, wildcards.p))
+
+
+
+rule shared_peak:
+    input:
+        lambda wildcards: get_peak_rep(config, wildcards)
+    output:
+        '{outdir}/{peaktype}/{celltype}/{experiment}/{target}_{sample}_{bs}_{p}_shared.txt'
+    shell:
+        "{chip_path}/scripts/overlapping_peaks.R {input} > {output}"
+
+def domain_width(config, wildcards):
+    exp_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    width = exp_dict[wildcards.target][wildcards.sample]['hiddendomain_width']
+    return(width)
+
+rule call_domains:
+    input:
+        bam='{outdir}/{genome}/filtered/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam',
+        bai='{outdir}/{genome}/filtered/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam.bai',
+        ctrl=lambda wildcards: get_compare_ctrl(config, wildcards),
+        g='{outdir}/{genome}/chrom_sizes.txt'
+    output:
+        '{outdir}/{genome}/domains/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}_{bs}_{p}_analysis.bed'
+    params:
+        o='{outdir}/{genome}/domains/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}_{bs}_{p}',
+        b='{bs}',
+        p='{p}'
+    shell:
+        "export PATH={chip_path}/hiddenDomains/:$PATH;"
+        "hiddenDomains -g {input.g} -t {input.bam} -c {input.ctrl[0]} "
+        "              -b {params.b} -p {params.p} -o {params.o}"
+
+
+
+
+def get_compare_ctrl(config, wildcards):
+    rep = int(wildcards.rep.replace('r', '')) - 1
+    exp_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    srr_id = '_'.join(exp_dict[wildcards.target][wildcards.sample]['control'])
+    return(['%s/%s/filtered/control/%s.bam' % (wildcards.outdir,
+                                               wildcards.genome, srr_id),
+            '%s/%s/filtered/control/%s.bam.bai' % (wildcards.outdir,
+                                                   wildcards.genome, srr_id)])
+
+rule bamcompare:
+    input:
+        bam='{outdir}/{genome}/filtered/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam',
+        bai='{outdir}/{genome}/filtered/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam.bai',
+        ctrl=lambda wildcards: get_compare_ctrl(config, wildcards)
+    output:
+        '{outdir}/{genome}/tracks/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}_fcoc.bw'
+    log:
+        '{outdir}/{genome}/log/tracks/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}_fcoc.log'
+    params:
+        min_mapq = config['min_mapq']
+    threads:
+        10
+    shell:
+        "bamCompare --minMappingQuality {params.min_mapq} "
+        "           --ratio ratio "
+        "           --skipNAs "
+        "           --pseudocount 0"
+        "           -p {threads} "
+        "           -bs 1"
+        "           -b1 {input.bam} "
+        "           -b2 {input.ctrl[0]} "
+        "           -of bigwig "
+        "           -o {output} > {log} 2>&1"
+
+def get_greylist(config, wildcards):
+    rep = int(wildcards.rep.replace('r', '')) - 1
+    exp_dict = config['experiment'][wildcards.celltype][wildcards.experiment]
+    srr_id = '_'.join(exp_dict[wildcards.target][wildcards.sample]['control'])
+    return('%s/%s/greylist/%s-grey.bed' % (wildcards.outdir,
+                                           wildcards.genome, srr_id))
+
+rule bw_pseudo:
+    input:
+        bw='{outdir}/{genome}/coverage/{name}.bw',
+        sizes=lambda wildcards: config['chrom_sizes'][wildcards.genome]
+    output:
+        '{outdir}/{genome}/coverage/{name}_pseudo.bw'
+    shell:
+        "bigWigToWig {input.bw} /dev/stdout | "
+        "   awk -vOFS='\t' '{{print $1, $2, $3, $4 + 1}}' | "
+        "   wigToBigWig /dev/stdin {input.sizes}"
+
+rule bw_coverage:
+    input:
+        bam='{outdir}/{genome}/filtered/{name}.bam',
+        bai='{outdir}/{genome}/filtered/{name}.bam.bai'
+    output:
+        '{outdir}/{genome}/coverage/{name}.bw'
+    threads:
+        10
+    shell:
+        "bamCoverage -p {threads}"
+        "            -b {input.bam}"
+        "            -o {output}"
+        "            -bs 1"
+
+
+rule filter_blackgrey_ctrl:
+    input:
+        bam='{outdir}/{genome}/mapping/control/{srr_id}.bam',
+        grey='{outdir}/{genome}/greylist/{srr_id}-grey.bed',
+        black=lambda wildcards: config['blacklist'][wildcards.genome]
+    output:
+        '{outdir}/{genome}/filtered/control/{srr_id}.bam'
+    shell:
+        "zcat {input.black} | cat - {input.grey} | "
+        "    samtools view -U {output} -L /dev/stdin {input.bam} > test"
+
+rule filter_blackgrey:
+    input:
+        bam='{outdir}/{genome}/mapping/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam',
+        grey=lambda wildcards: get_greylist(config, wildcards),
+        black=lambda wildcards: config['blacklist'][wildcards.genome]
+    output:
+        '{outdir}/{genome}/filtered/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam'
+    shell:
+        "zcat {input.black} | cat - {input.grey} | "
+        "    samtools view -U {output} -L /dev/stdin {input.bam} > test"
+
+
+rule generate_greylist:
+    input:
+        '{outdir}/mapping/control/{srr}.bam'
+    output:
+        '{outdir}/greylist/{srr}-greystats.csv',
+        '{outdir}/greylist/{srr}-greydepth.tsv',
+        '{outdir}/greylist/{srr}-grey.bed'
+    params:
+        out='{outdir}/greylist/'
+    shell:
+        "chipseq-greylist --outdir {params.out} {input}"
+
+
+ruleorder: mergeCtrl > markdup
+
+rule mergeCtrl:
+    input:
+        lambda wildcards: ['%s/mapping/control/%s.bam' % (wildcards.outdir, srr_id)
+                           for srr_id in wildcards.id_list.split('_')]
+    output:
+        '{outdir}/mapping/control/{id_list, .*_.*}.bam'
+    threads:
+        10
+    shell:
+        "sambamba merge -t {threads} {output} {input}"
+
+rule index:
+    input:
+        '{outdir}/filtered/{folder}/{file}.bam'
+    output:
+        '{outdir}/filtered/{folder}/{file}.bam.bai'
+    threads:
+        5
+    shell:
+        "sambamba index -t {threads} {input}"
+
+
+
+
+def keep_duplicates(config, wildcards, is_control=False):
+    if is_control:
+        for ct in config['experiment']:
+            for exp in config['experiment'][ct]:
+                for t in config['experiment'][ct][exp]:
+                    for s in config['experiment'][ct][exp][t]:
+                        sample_dict = config['experiment'][ct][exp][t][s]
+                        if wildcards.srr_id in sample_dict['control']:
+                            keep_dup = sample_dict['keep_duplicates']
+    else:
+        celltype_dict = config['experiment'][wildcards.celltype]
+        target_dict = celltype_dict[wildcards.experiment][wildcards.target]
+        keep_dup =  target_dict[wildcards.sample]['keep_duplicates']
+    return(keep_dup)
+
+def markdup(keepdup, input, output):
+    if keepdup:
+        shell("mv {input} {output}")
+    else:
+        shell("sambamba markdup -r {input} {output} ")
+
+rule markdup:
+    input:
+        '{outdir}/mapping/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam.tmp'
+    output:
+        '{outdir}/mapping/{celltype}/{experiment}/{target}_{sample}_{rep}_{srr_id}.bam'
+    params:
+        keepdup=lambda wildcards: keep_duplicates(config, wildcards)
+    threads:
+        10
+    run:
+        markdup(params.keepdup, input, output)
+
+rule markdup_ctrl:
+    input:
+        '{outdir}/mapping/control/{srr_id}.bam.tmp'
+    output:
+        '{outdir}/mapping/control/{srr_id}.bam'
+    params:
+        keepdup=lambda wildcards: keep_duplicates(config, wildcards,
+                                                  is_control=True)
+    threads:
+        10
+    run:
+        markdup(params.keepdup, input, output)
+
+def run_align(input, threads, aligner, index, min_mapq, output):
+    if aligner == 'bowtie2':
+        if len(input) is 1:
+            bowtie=("bowtie2 --no-unal -p {threads} -x {index} -U {input}")
+        else:
+            bowtie=("bowtie2 --no-unal -p {threads} -x {index} -1 {input[0]} "
+                    "        -2 {input[1]} | awk '{{if ($7==\"=\" || $1 ~ /^@/)"
+                    "                               {{print $0}}}}'")
+        view = ("sambamba view -S -F \"mapping_quality >= {min_mapq}\" -f bam "
+                "--compression-level=0 /dev/stdin ")
+        sort = "sambamba sort -o {output} --compression-level=0 /dev/stdin "
+        shell(' | '.join((bowtie, view,  sort)))
+    elif aligner == 'bwa':
+        if len(input) is 1:
+            bowtie=("bwa mem -t {threads} {index} {input} ")
+        else:
+            bowtie=("bwa mem -t {threads} {index} {input}  | "
+                    "awk '{{if ($7==\"=\" || $1 ~ /^@/) {{print $0}}}}'")
+        view = ("sambamba view -S -F \"mapping_quality >= {min_mapq}\" -f bam "
+                "--compression-level=0 /dev/stdin ")
+        sort = "sambamba sort -o {output} --compression-level=0 /dev/stdin "
+        shell(' | '.join((bowtie, view,  sort)))
+
+
+def get_sample_dict(config, wildcards, is_control=False):
+    if is_control:
+        for ct in config['experiment']:
+            for exp in config['experiment'][ct]:
+                for t in config['experiment'][ct][exp]:
+                    for s in config['experiment'][ct][exp][t]:
+                        sample_dict = config['experiment'][ct][exp][t][s]
+                        if wildcards.srr_id in sample_dict['control']:
+                            celltype = ct
+                            experiment = exp
+                            target = t
+                            sample = s
+                            rep = sample_dict['control'].index(wildcards.srr_id)
+    else:
+        celltype= wildcards.celltype
+        experiment = wildcards.experiment
+        target = wildcards.target
+        sample = wildcards.sample
+        rep = int(wildcards.rep.replace('r', '')) - 1
+
+    sample_dict = config['experiment'][celltype][experiment][target][sample]
+    return(sample_dict)
+
+
+
+def get_align_input(config, wildcards, is_control=False):
+    sample_dict = get_sample_dict(config, wildcards, is_control)
+    if sample_dict['source'] in ["GEO", "ENCODE"]:
+        if sample_dict['is_paired']:
+            regex_list = ['%s/raw_data/%s_1.fastq.gz',
+                          '%s/raw_data/%s_2.fastq.gz']
+        else:
+            regex_list = ['%s/raw_data/%s.fastq.gz']
+        input_list = [regex % (wildcards.outdir, wildcards.srr_id)
+                      for regex in regex_list]
+    elif sample_dict['source'] == "local":
+        fastq_list = glob.glob('/'.join((config['forge'], '**/*.fastq.gz')),
+                               recursive=True)
+        input_list = [fastq for fastq in fastq_list
+                      if wildcards.srr_id in fastq]
+        if sample_dict['is_paired']:
+            if 'R2' in input_list[0] and 'R1' in input_list[1]:
+                input_list = [input_list[1], input_list[0]]
+    return(input_list)
+
+
+
+def get_aligner(config, wildcards, is_control=False):
+    sample_dict = get_sample_dict(config, wildcards, is_control)
+    return(sample_dict['aligner'])
+
+def get_aligner_index(config, wildcards, is_control=False):
+    aligner = get_aligner(config, wildcards, is_control)
+    return(config['aligner_index'][aligner][wildcards.genome])
+
+
+rule align_chip:
+    input:
+        lambda wildcards: get_align_input(config, wildcards)
+    params:
+        aligner=lambda wildcards: get_aligner(config, wildcards),
+        index=lambda wildcards: get_aligner_index(config, wildcards),
+        min_mapq=config['min_mapq']
+    output:
+        temp('{outdir}/{genome}/mapping/{celltype}/{experiment}/'
+             '{target}_{sample}_{rep}_{srr_id}.bam.tmp')
+    threads:
+        10
+    run:
+        run_align(input, threads, params.aligner, params.index, params.min_mapq,
+                  output)
+
+rule align_control:
+    input:
+        lambda wildcards: get_align_input(config, wildcards, is_control=True)
+    params:
+        aligner=lambda wildcards: get_aligner(config, wildcards, is_control=True),
+        index=lambda wildcards: get_aligner_index(config, wildcards, is_control=True),
+        min_mapq=config['min_mapq']
+    output:
+        '{outdir}/{genome}/mapping/control/{srr_id, [^_]+}.bam.tmp'
+    threads:
+        10
+    run:
+        run_align(input, threads, params.aligner, params.index, params.min_mapq,
+                  output)
+
+
+
+ruleorder: download_paired_encode > download_single_encode
+ruleorder: download_paired_encode > download_paired_sra
+
+ruleorder: download_single_encode > download_single_sra
+ruleorder: download_single_encode > download_paired_sra
+
+ruleorder: download_paired_sra > download_single_sra
+
+
+
+rule download_paired_sra:
+    output:
+        '{outdir}/raw_data/{srr_id}_1.fastq.gz',
+        '{outdir}/raw_data/{srr_id}_2.fastq.gz'
+    params:
+        srr_id='{srr_id}',
+        out='{outdir}/raw_data/'
+    threads: 5
+    shell:
+        "parallel-fastq-dump --split-3 --outdir {params.out} --gzip "
+        "                    --sra-id {params.srr_id} --threads {threads}"
+
+rule download_single_sra:
+    input: '{outdir}/raw_data/{srr_id}_prefetch'
+    output: '{outdir}/raw_data/{srr_id}.fastq.gz'
+    params:
+        srr_id='{srr_id}',
+        out='{outdir}/raw_data/'
+    threads: 5
+    shell:
+        "parallel-fastq-dump --outdir {params.out} --gzip "
+        "                    --sra-id {params.srr_id} --threads {threads}"
+
+def get_encode_pair(config, wildcards):
+    for ct in config['experiment']:
+        for exp in config['experiment'][ct]:
+            for t in config['experiment'][ct][exp]:
+                for s in config['experiment'][ct][exp][t]:
+                    sample_dict = config['experiment'][ct][exp][t][s]
+                    if wildcards.enc_id in sample_dict['treatment']:
+                        i = sample_dict['treatment'].index(wildcards.enc_id)
+                        return(sample_dict['treatment2'][i])
+                    elif wildcards.enc_id in sample_dict['control']:
+                        i = sample_dict['control'].index(wildcards.enc_id)
+                        return(sample_dict['control2'][i])
+
+
+rule download_paired_encode:
+    output:
+        '{outdir}/raw_data/{enc_id}_1.fastq.gz',
+        '{outdir}/raw_data/{enc_id}_2.fastq.gz'
+    params:
+        http=config['encode_http'],
+        enc_id="{enc_id}",
+        enc_id2=lambda wildcards: get_encode_pair(config, wildcards)
+    wildcard_constraints:
+        enc_id="ENCFF.+"
+    run:
+        pattern = [params.http.format(enc_id=params.enc_id),
+                   params.http.format(enc_id=params.enc_id2)]
+
+        shell("wget -O {output[0]} {pattern[0]}; "
+              "wget -O {output[1]} {pattern[1]}")
+
+rule download_single_encode:
+    output: '{outdir}/raw_data/{enc_id}.fastq.gz'
+    params:
+        http=config['encode_http'],
+        enc_id="{enc_id}"
+    wildcard_constraints:
+        enc_id="ENCFF.+"
+    run:
+        pattern = params.http.format(enc_id=params.enc_id)
+        shell("wget -O {output} {pattern}")
+
+
+rule prefetch_sra:
+    output:
+        temp('{outdir}/raw_data/{srr_id}_prefetch')
+    params:
+        srr_id='{srr_id}',
+    shell:
+        "prefetch {params.srr_id}; "
+        "touch {output}"

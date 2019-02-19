@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+
+<title>hiddenDomains Manual and Tutorial</title>
+
+<style type="text/css">
+body {
+   font-family: sans-serif;
+   background-color: white;
+   font-size: 12px;
+   margin: 8px;
+}
+
+tt, code, pre {
+   font-family: 'DejaVu Sans Mono', 'Droid Sans Mono', 'Lucida Console', Consolas, Monaco, monospace;
+}
+
+table {
+   border-collapse: collapse;
+}
+
+table, th, td {
+   border: 1px solid black;
+}
+
+tr.alt {
+  color: #000000;
+  background-color: #EAF2D3;
+}
+
+td {
+   padding: 5px;
+}
+
+td.args {
+   text-align:right;
+   verticle-align:top;
+}
+
+td.values {
+   text-align:left;
+   verticle-align:top;
+}
+
+h1 { 
+   font-size:2.2em; 
+}
+
+h2 { 
+   font-size:1.8em; 
+}
+
+h3 { 
+   font-size:1.4em; 
+}
+
+h4 { 
+   font-size:1.0em; 
+}
+
+h5 { 
+   font-size:0.9em; 
+}
+
+h6 { 
+   font-size:0.8em; 
+}
+
+a:visited {
+   color: rgb(50%, 0%, 50%);
+}
+
+pre {	
+   margin-top: 0;
+   max-width: 95%;
+   border: 1px solid #ccc;
+   white-space: pre-wrap;
+}
+
+pre code {
+   display: block; padding: 0.5em;
+}
+
+code.r, code.cpp {
+   background-color: #F8F8F8;
+}
+
+#table, td, th {
+#  border: none;
+#}
+
+blockquote {
+   color:#666666;
+   margin:0;
+   padding-left: 1em;
+   border-left: 0.5em #EEE solid;
+}
+
+hr {
+   height: 0px;
+   border-bottom: none;
+   border-top-width: thin;
+   border-top-style: dotted;
+   border-top-color: #999999;
+}
+
+@media print {
+   * { 
+      background: transparent !important; 
+      color: black !important; 
+      filter:none !important; 
+      -ms-filter: none !important; 
+   }
+
+   body { 
+      font-size:12pt; 
+      max-width:100%; 
+   }
+       
+   a, a:visited { 
+      text-decoration: underline; 
+   }
+
+   hr { 
+      visibility: hidden;
+      page-break-before: always;
+   }
+
+   pre, blockquote { 
+      padding-right: 1em; 
+      page-break-inside: avoid; 
+   }
+
+   tr, img { 
+      page-break-inside: avoid; 
+   }
+
+   img { 
+      max-width: 100% !important; 
+   }
+
+   @page :left { 
+      margin: 15mm 20mm 15mm 10mm; 
+   }
+     
+   @page :right { 
+      margin: 15mm 10mm 15mm 20mm; 
+   }
+
+   p, h2, h3 { 
+      orphans: 3; widows: 3; 
+   }
+
+   h2, h3 { 
+      page-break-after: avoid; 
+   }
+}
+
+</style>
+
+<!-- Styles for R syntax highlighter -->
+<style type="text/css">
+   pre .operator,
+   pre .paren {
+     color: rgb(104, 118, 135)
+   }
+
+   pre .literal {
+     color: rgb(88, 72, 246)
+   }
+
+   pre .number {
+     color: rgb(0, 0, 205);
+   }
+
+   pre .comment {
+     color: rgb(76, 136, 107);
+   }
+
+   pre .keyword {
+     color: rgb(0, 0, 255);
+   }
+
+   pre .identifier {
+     color: rgb(0, 0, 0);
+   }
+
+   pre .string {
+     color: rgb(3, 106, 7);
+   }
+</style>
+
+</head>
+
+<body>
+<h1>hiddenDomains <a href="#manual">Manual</a>, 
+<a href="#tutorial">Tutorial</a> and 
+<a href="#trouble">Troubleshooting Guide</a></h1>
+
+<p><b>hiddenDomains</b> is a suite of programs used to identify significant
+enrichment of ChIP-seq reads that span large domains, like HK27me3. The input
+data can be in BAM format, or in a tab-delimited "reads per bin" format 
+described below. The output is BED formatted files listing the enriched
+domains and their posterior probabilities.
+</p>
+
+<p><b>hiddenDomains</b> requires <a href="http://samtools.sourceforge.net/">samtools</a>, so if you don't 
+already have that installed, you'll need to do that.</p>
+<p>If you wish to run <a href="#peakCenters"><code>peakCenters</code></a>, you will also need to install
+<a href="https://github.com/arq5x/bedtools2/releases">bedtools</a></p>
+
+<p>This manual and tutorial will teach you how to use the 
+<b>hiddenDomains</b> suite of  programs.  
+In it we will analyze a mouse ChIP-seq dataset for H3k27me3
+</p>
+<p>
+<h2><a id="tutorial">Quickstart Tutorial</a></h2>
+<ol>
+<li>
+<p><b>Download and unpack hiddenDomains</b></p>
+<p>If you haven't already done this, download the latest version of
+hiddenDomains from the Sourceforge website:
+<a href="https://sourceforge.net/projects/hiddendomains/">https://sourceforge.net/projects/hiddendomains/</a>
+<p> Now unpack it
+<pre><code class="r">
+shell$ tar -xzvf hiddenDomains.VERSION.NUMBER.tar.gz
+</pre></code>
+Where <code>VERSION</code> and <code>NUMBER</code> represent the release
+that you downloaded.</p>
+
+<li><b>Install R and required R packages (if necessary)</b>
+<p>
+<a href="http://www.r-project.org/">Download and install R</a> if you don't 
+already have it.
+
+<p>
+If you don't already have them, you will need to install two hidden Markov model libraries:
+<ul>
+<li><a href="http://cran.r-project.org/web/packages/depmixS4/index.html">depmixS4</a>
+<li><a href="http://cran.r-project.org/web/packages/HiddenMarkov/index.html">HiddenMarkov</a>
+</ul></p>
+
+You can do this by starting R on the command line:
+<pre><code class="r">
+shell$ R
+</pre></code>
+
+<p>
+<!--Or, if you prefer <a href="http://www.rstudio.com/">RStudio</a>, 
+you can use that.
+
+<p>Regardless of how you started R, -->
+Then type the following commands to install the packages.
+
+<pre><code class="r">
+install.packages("depmixS4")
+install.packages("HiddenMarkov")
+</pre></code>
+
+
+<li><p><b>Analyze the Data</b></p>
+Once you have unpacked <b>hiddenDomains</b>, the next step is to analyze it.
+
+<p><b>hiddenDomains</b> comes with two example data files:
+<ul>
+<li><code>k27me3_chr6.bam</code>, An H3K27me3 ChIP-seq dataset that we will use to identify enriched domains.
+<li><code>input_chr6.bam</code>, An "Input" ChIP-seq dataset that we can use 
+to limit the number of
+false positives by ruling out domains that are enriched regardless of the
+antibody.
+</ul>
+</p>
+Both of these files only contain reads that mapped to chromosome 6 in order
+to limit the size of the files and to get you up and running as quickly 
+as possible.<p>
+
+<p>To analyze the data with 
+<a href="#hiddenDomains"><code>hiddenDomains</code></a>.
+
+<pre><code>
+shell$ cd hiddenDomain.VERSION.NUMBER
+shell$ ./hiddenDomains -g ChromInfo_mm9.txt -b 200 -t k27me3_chr6.bam -c input_chr6.bam -o results
+</code></pre>
+<p><code>hiddenDomains</code> has three required parameters:
+<ul>
+<li><code>-g ChromInfo_FILE.txt    :</code>A tab delimited text file that lists
+the chromosome names (these have to match the chromosome names in the BAM 
+files) and their sizes. <code>hiddenDomains</code> comes with ChromInfo.txt files for
+MM9, MM10, HG18 and HG19, and is easy to make a custom file for other genomes.
+  <p>
+    To make your own ChromInfo.txt file, just create a tab delimited file 
+    with the chromosome names
+    in the first column and their sizes in the second column.  Here is an 
+    example ChromInfo.txt file for a genome with 3 chromosomes:
+<pre>
+    chr1    197195432
+    chr2    181748087
+    chr3    159599783    
+</pre>
+<li><code>-t CHIP_SEQ.bam    :</code>The ChIP-seq dataset you want to 
+analyze. The <code>-t</code> stands for "treatment". <b>NOTE:</b> While you
+can run <code>hiddenDomains</code> without a control (or "input") file, we
+strongly recommend using one. This will help eliminate false positives in the
+output.<p>
+<li><code>-o OUTPUT_FILE_PREFIX    :</code>The prefix that you want all
+of the output filenames to have. <code>hiddenDomains</code> creates four or five
+output files. These are:
+<p>
+<ol>
+<li><code>OUTPUT_FILE_PREFIX_treatment_bins.txt    :</code>This file contains
+"binned" read counts.
+<li><code>OUTPUT_FILE_PREFIX_control_bins.txt    :</code>This file contains
+"binned" read counts. <code>hiddenDomains</code> creates this only if you
+provide a control dataset.
+<li><code>OUTPUT_FILE_PREFIX_domains.txt    :</code>This file contains
+the enriched domains and peaks, along with their posterior probabilities.
+<li><code>OUTPUT_FILE_PREFIX_vis.bed    :</code>A BED file that
+is ready to be uploaded to the UCSC genome browser.
+<li><code>OUTPUT_FILE_PREFIX_analysis.bed    :</code>A BED file that
+has all consecutive enriched bins merged into a single line, making it ideal
+for analysis with <code>bedtools</code>.
+</ol>
+</ul>
+<p>
+In addition to these required parameters, <code>hiddenDomains</code> accepts
+many optional parameters (described in detail in the <a href="#hiddenDomains">manual</a>). The
+optional parameters that are used here are:
+<ul>
+<li><code>-b BIN_WIDTH   :</code>The width of the bins for analysis. The
+default size is 1000bp.
+<li><code>-c INPUT_SEQ.bam   :</code>The "input" dataset you want to 
+analyze. The <code>-c</code> stands for "control".
+</ul>
+<p>
+
+<p><b>NOTES:</b>
+<ol>
+<li>Additional parameters and usage information can be found by entering
+<code>hiddenDomains -h</code><p>
+<li>Depending on the computer, this command should run in less than 5 minutes
+with ample notices printed to the terminal while it works.<p>
+<li>If you get an error that <code>hiddenDomains</code> could not run, 
+you either need to
+make it executable, with the command
+<p><pre><code>shell$ chmod 755 hiddenDomains</pre></code> 
+and then re-run the command above, 
+or run it directly with Perl using the following command 
+<p><pre><code>shell$ perl ./hiddenDomains -g ChromInfo_mm9.txt -b 200 -t k27me3_chr6.bam -c input_chr6.bam -o results</pre></code>
+</ol>
+</p>
+
+<p>
+To verify that <b>hiddenDomains</b> has worked correctly, we have provided
+bedgraph files for the original data and you can upload these to the UCSC Genome
+Browser along with
+the BED files that you just created.  You can then peruse the results at
+your liberty, however, there are two locations that we would like to point
+out that illustrate the value of having a control dataset.
+<p>
+These are the files you need to upload to the UCSC Mouse mm9 Genome Browser:
+<ol>
+<li><b>input_chr6.bedgraph.gz</b> - this will display the normalized reads from the
+"input". The reads should appear uniformly distributed.
+ You may want to
+set the track "Vertical viewing range" from 0 to 200. You do this by clicking
+on the grey bar on the left side of the track, setting the Vertical viewing
+range "min" and "max" values to 0 and 200, and then selecting
+"use vertical viewing range setting" form the "Data view scaling" pulldown
+menu.
+<li><b>k27me3_chr6.bedgraph.gz</b> - this will display the normalized reads - 
+this will display the normalized reads from the K27me3 ChIP-seq experiment. The
+reads should appear piled up near genes that are repressed. You may want to
+set the track "Vertical viewing range" from 0 to 200. 
+<li><b>k27_hiddenDomain_no_control.bed</b>
+<li><b>k27_hiddenDomain.bed</b>
+</ol>
+<p>
+Once you finish uploading the files, you can point the Genome Browser to the
+Hox gene cluster at chr6:52,000,664-52,512,712.  Here you see that both
+methods called the rather broad domain of H3k27me3 reads that cover this
+cluster of genes.
+<p>
+<center>
+<img src="preComputedFiles/chr6_hox_cluster.png">
+</center>
+<p>
+chr6:103,414,566-103,717,194 highlights the importance of using a control
+dataset to limit false positives.
+In this example there is a location with a lot of reads in both the
+K27me3 dataset and the input dataset.  Without using the input dataset as a 
+control, hiddenDomains calls a peak at this location.  However, when run
+with the input dataset as a control, hiddenDomains does not call this peak.
+<p>
+<center>
+<img src="preComputedFiles/chr6_false_positive_without_control.png">
+</center>
+<p>
+<li><p><b>Identify peak centers (Optional for transcription factor ChIP-seq):</b></p>
+<b>NOTE:</b>This step requires that <a href="https://github.com/arq5x/bedtools2/releases">bedtools</a>.
+<p>
+If this tutorial were focused on ChIP-seq for a transcription factor, we could
+now search for the center of each peak. This is optional, since often
+people only want to know if something is bound in a region or not.
+<p>
+To identify the centers of peaks, you could run a command like the following:
+<pre><code>
+shell$ peakCenters domains_analysis.bed chipSeq.bam > domains_centers.bed
+</code></pre>
+<a href="#peakCenters"><code>peakCenters</code></a> takes the "analysis.bed" file that 
+<code>hiddenDomains</code> created and the ChIP-seq and finds the region with
+the most reads within each domain.
+
+</ol>
+<p>
+<h2><a id="manual">Manual</a></h2>
+<p>
+<b>hiddenDomains</b> can be run two different ways. In the tutorial, we used
+<a href="#hiddenDomains"><code>hiddenDomains</code></a> to do three things:
+<ol>
+<li>Bin the reads<p>
+<li>Look for domains<p>
+<li>Generate BED files
+</ol><p>
+However, for more control, you can do these things separately. The 
+individual programs have additional options. For example, you
+can specify to only analyze
+certain chromosomes, or you can customize the track line in the "vis"
+BED file.
+<p>
+If you want to run the programs separately...
+<ol>
+<li><a href="#binReads"><code>binReads.pl</code></a> bins reads
+<li><a href="#hiddenDomains.R"><code>hiddenDomains.R</code></a> looks for domains
+<li><a href="#domainsToBed"><code>domainsToBed.pl</code></a> and
+<a href="#domainsMergeToBed"><code>domainsMergeToBed.pl</code></a>
+create BED files.
+</ol>
+<p>
+
+<h3><a id="binReads">binReads.pl</a></h3>
+<p>
+<code>Usage: binReads.pl [options] bamFile.bam > binned_reads.txt</code>
+<p>
+<code>binReads.pl</code> takes a BAM formatted file of aligned reads and
+outputs the number of reads that overlap each bin, where a "bin" is an equally
+sized, non-overlapping portion of a chromosome.
+<p>
+<b>Options</b>
+<table>
+<tr>
+<td class="args" style="width:1.2in"><b>-h</b></td><td>Print out the help information.</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-b BIN_WIDTH</b></td>
+<td>The width of the bin. Default is 1000bp, which works well with domains
+and transcription factors. If the exact location of a transcription factor
+is of interest (rather than answering "does this transcription factor bind
+in this region"), you can measure the peak width in the UCSC genome browser
+and use that to define the bid width.</td>
+</tr>
+<tr>
+<td class="args"><b>-B</b></td><td>The input file is in BED format.</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-q MIN_MAPQ</b></td>
+<td>The minimum MAPQ score. Default is 30.</td>
+</tr>
+<tr>
+<td class="args"><b>-M</b></td><td>Assume all bins should be on 
+mouse chromosomes.  This is the default.</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-H</b></td>
+<td>Assume all bin should be on human chromosomes.</td>
+</tr>
+<tr>
+<td class="args"><b>-c "chr1 chr2 ..."</b></td>
+<td>Create a custom list of chromosomes to bin reads into.</td>
+</tr>
+</table>
+
+<h3><a id="domainsMergeToBed">domainsMergeToBed.pl</a></h3>
+<p>
+<code>Usage: domainsMergeToBed.pl [options] domainFile.txt > domainFile.bed</code>
+<p>
+<code>domainsMergeToBed.pl</code> takes the output from <code>hiddenDomains.R</code>
+and merges all consecutive domains with a posterior greater than
+a threshold (default is 0; all domains are merged) into a single domain 
+and generates track of enriched domains 
+for the <a href="https://genome.ucsc.edu/">UCSC Genome Browser</a>.
+<p>
+<b>Options</b>
+<table>
+<tr>
+<td class="args" style="width:1.2in"><b>-h</b></td><td>Print out the help information.</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-b BIN_WIDTH</b></td>
+<td>The width of the bin. Default is 1000bp.</td>
+</tr>
+<tr>
+<td class="args"><b>-g ChromInfo.txt</b></td>
+<td>If you get an out of bounds error when uploading a bed file to the UCSC
+    genome browser, you can use this option to trim the bounds to the size of 
+    the chromosomes. hiddenDomains comes with ChromInfo.txt files for MM9, 
+    MM10 and HG19, and it is easy to make a custom file for other genomes.
+  <p>
+    To make your own ChromInfo.txt file, just create a tab delimited file 
+    with the chromosome names
+    in the first column and their sizes in the second column.  Here is an 
+    example ChromInfo.txt file for a genome with 3 chromosomes:
+<pre>
+    chr1    197195432
+    chr2    181748087
+    chr3    159599783    
+</pre>
+</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-p MIN_POSTERIOR</b></td>
+<td>Toss out parts of domains that have posterior values that are less
+    than MIN_POSTERIOR. You can set this to any value you want, but for
+    reference, domainsToBed bins according the following scale:
+ <pre>
+    >= 0.9
+    0.9 > posterior >= 0.8
+    0.8 > posterior >= 0.7
+    0.7 > posterior >= min posterior for significance
+</pre>
+    The default value is 0; everything is merged by default.</td>
+</tr>
+<tr>
+<td class="args"><b>-t</b></td>
+<td>If set, a track line will be added to the start of the bed file</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-n TRACK_NAME</b></td>
+<td>The name you want to give your track. The default value is the name of
+the domain file (without the .txt suffix if it has one).</td>
+</tr>
+</table>
+
+<h3><a id="domainsToBed">domainsToBed.pl</a></h3>
+<p>
+<code>Usage: domainsToBed.pl [options] domainFile.txt > domainFile.bed</code>
+<p>
+<code>domainsToBed.pl</code> takes the output from <code>hiddenDomains.R</code>
+and generates track of enriched domains and their posterior probabilities 
+for the <a href="https://genome.ucsc.edu/">UCSC Genome Browser</a>.
+<p>
+<b>Options</b>
+<table>
+<tr>
+<td class="args" style="width:1in"><b>-h</b></td><td>Print out the help information.</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-b BIN_WIDTH</b></td>
+<td>The width of the bin. Default is 1000bp.</td>
+</tr>
+<tr>
+<td class="args"><b>-g ChromInfo.txt</b></td>
+<td>If you get an out of bounds error when uploading a bed file to the UCSC
+    genome browser, you can use this option to trim the bounds to the size of 
+    the chromosomes. hiddenDomains comes with ChromInfo.txt files for MM9, 
+    MM10 and HG19, and it is easy to make a custom file for other genomes.
+  <p>
+    To make your own ChromInfo.txt file, just create a tab delimited file 
+    with the chromosome names
+    in the first column and their sizes in the second column.  Here is an 
+    example ChromInfo.txt file for a genome with 3 chromosomes:
+<pre>
+    chr1    197195432
+    chr2    181748087
+    chr3    159599783    
+</pre>
+</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-t</b></td>
+<td>If set, a track line will be added to the start of the bed file</td>
+</tr>
+<tr>
+<td class="args"><b>-n TRACK_NAME</b></td>
+<td>The name you want to give your track. The default value is the name of
+the domain file (without the .txt suffix if it has one).</td>
+</tr>
+</table>
+
+
+<h3><a id="hiddenDomains">hiddenDomains</a></h3>
+<p>
+<code>Usage: hiddenDomains [options] -g ChromInfo -t TreatmentReads -o OutputPrefix</code>
+<p>
+<b>Options</b>
+
+<table>
+<tr>
+<td class="args" style="width:1.2in"><b>-h</b></td><td>Print out the help information.</td>
+<tr class="alt">
+<td class="args"><b>-b BIN_WIDTH</b></td>
+<td>The width of the bin. Default is 1000bp, which works well with domains
+and transcription factors. If the exact location of a transcription factor
+is of interest (rather than answering "does this transcription factor bind
+in this region"), you can measure the peak width in the UCSC genome browser
+and use that to define the bid width.</td>
+</tr>
+<tr>
+<td class="args"><b>-B</b></td><td>The input file is in BED format.
+NOTE: All
+    read files have to have to same format (either BED or BAM). Use
+    binReads.pl as a stand alone program if you have a more complicated set up.
+</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>-c ControlReads</b></td><td>
+A BED or BAM file that contains aligned read reads. Use the -B option to
+    specify BED format. BAM format is the default.
+</td></tr>
+<td class="args"><b>-g ChromInfo.txt</b></td>
+<td>If you get an out of bounds error when uploading a bed file to the UCSC
+    genome browser, you can use this option to trim the bounds to the size of 
+    the chromosomes. hiddenDomains comes with ChromInfo.txt files for MM9, 
+    MM10 and HG19, and it is easy to make a custom file for other genomes.
+  <p>
+    To make your own ChromInfo.txt file, just create a tab delimited file 
+    with the chromosome names
+    in the first column and their sizes in the second column.  Here is an 
+    example ChromInfo.txt file for a genome with 3 chromosomes:
+<pre>
+    chr1    197195432
+    chr2    181748087
+    chr3    159599783    
+</pre>
+</td>
+</tr>
+
+<tr class="alt">
+<td class="args"><b>-o OutputPrefix</b></td>
+<td>
+hiddenDomains generates four or five files with names that start with
+    OutputPrefix. 
+<ol>
+<li><code>OutputPrefix_treatment_bins.txt    :</code>
+A file with the read counts per bin.
+<li><code>OutputPrefix_control_bins.txt    :</code>
+A file with the read counts per bin.
+<li><code>OutputPrefix_domains.txt    :</code>
+A text file with all of the enriched domains and posterior probabilities.
+<li><code>OutputPrefix_vis.bed    :</code>
+A BED file for visualization, which contains one line per 
+    significantly enriched bin - this allows for color coding based on the 
+    posterior probability.
+<li><code>OutputPrefix_analysis.bed    :</code>
+The second BED file is for analysis, and this merges 
+    all consecutive bins with posterior probabilities greater than MIN_POSTERIOR 
+    (as specified with the -p option) or the default value, 0 - which merges 
+    all consecutive significant bins.
+</ol>
+</td>
+</tr>
+
+<tr>
+<td class="args"><b>-p MIN_POSTERIOR</b></td>
+<td>Toss out parts of domains that have posterior values that are less
+    than MIN_POSTERIOR. You can set this to any value you want, but for
+    reference, domainsToBed bins according the following scale:
+ <pre>
+    >= 0.9
+    0.9 > posterior >= 0.8
+    0.8 > posterior >= 0.7
+    0.7 > posterior >= min posterior for significance
+</pre>
+    The default value is 0; everything is merged by default.</td>
+</tr>
+
+
+<tr class="alt">
+<td class="args"><b>-q MIN_MAPQ</b></td>
+<td>The minimum MAPQ score. Default is 30.</td>
+</tr>
+
+<tr>
+<td class="args"><b>-t TreatmentReads</b></td><td>
+A BED or BAM file that contains aligned read reads. Use the -B option to
+    specify BED format. BAM format is the default.
+</td></tr>
+
+
+</table>
+
+
+<h3><a id="hiddenDomains.R">hiddenDomains.R</a></h3>
+<p>
+<code>Usage: hiddenDomains(treat.bin.file="TREATMENT_bins.txt", control.bin.file="CONTROL_bins.txt", out.file.name="OUTFILE.txt", chr.names=["mouse"|"human"|c("chr1","chr2", "etc"]))
+</code>
+<p>
+<code>hiddenDomains.R</code> takes the output from <code>binReads.pl</code>
+and attempts to identify enriched domains using Hidden Markov Models (HMMs).
+<p>
+<b>Options</b>
+<table>
+<tr>
+<td class="args"><b>treat.bin.file</b></td>
+<td>This should be set to the name of the file with the "treatment" read counts</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>control.bin.file</b></td>
+<td>This should be set to the name of the file with the "control" read counts</td>
+</tr>
+<tr>
+<td class="args"><b>normalize</b></td>
+<td><code>TRUE</code> or <code>FALSE</code>.
+Should the treatment and control files be normalized for depth?  The default
+value is <code>TRUE</code></td>
+</tr>
+<tr class="alt">
+<td class="args"><b>chr.names</b></td>
+<td>This can be set to "mouse", "human" or a vector of chromosomes that
+you want to look for domains in.</td>
+</tr>
+<tr>
+<td class="args"><b>skip.chrs</b></td><td>Use this parameter to skip analysis of specific chromosomes. You can specify an individual chromosome with a string, like <code>"chrX"</code>, or you can specify a vector of chromosomes, like <code>c("chr1", "chr2")</code>.</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>min.prob</b></td>
+<td>Bins with a lower posterior probability than <code>min.prob</code> will
+be filtered out.  The default value is 0.6.</td>
+</tr>
+<tr>
+<tr>
+<td class="args"><b>out.flie.name</b></td>
+<td>Use this to provide the name of the output file you want hiddenDomains
+to create with the results</td>
+</tr>
+<tr class="alt">
+<td class="args"><b>min.read.count</b></td>
+<td>This is a parameter that can be fiddled with if the HMM libraries fail
+to converge.  If this happens, try setting this to -1.</td>
+</tr>
+<tr>
+<td class="args"><b>data</b></td>
+<td>If you have already loaded in the "treatment" data into a variable,
+you can set data to that variable and omit <code>treat.bin.file</code></td>
+</tr>
+<tr class="alt">
+<td class="args"><b>control.data</b></td>
+<td>If you have already loaded in the "control" data into a variable,
+you can set data to that variable and omit <code>control.bin.file</code></td>
+</tr>
+<tr>
+<td class="args"><b>debug</b></td>
+<td><code>TRUE</code> or <code>FALSE</code>.
+Print out a lot of intermediate messages.  The default value is
+<code>FALSE</code></td>
+</tr>
+</table>
+
+
+<h3><a id="peakCenters">peakCenters</a></h3>
+<p>
+<code>
+Usage: peakCenters [options] domains_analysis.bed &ltchipSeq.bam | chipSeq.bed&gt &gt domains_centers.bed
+</code>
+<p>
+This program takes an "_analysis.bed" file (output from <code>hiddenDomains</code>) anda ChIP-seq BAM (or BED) file and identifies the center of peaks.
+<p>
+<code>peakCenters</code> requires <a href="https://github.com/arq5x/bedtools2/releases">bedtools</a> to be installed on the system.
+<p>
+<b>Options</b>
+
+<table>
+<tr>
+<td class="args" style="width:1in"><b>-h</b></td>
+<td>Print out the help information</td></tr></table>
+
+
+
+<h2><a id="trouble">Troubleshooting Guide</a></h2>
+<p>
+<ul>
+<li>If the hiddenDomains.R script fails to find peaks/domains on a
+chromosome, but finds them on others...
+<ol>
+<li>Consider tweaking the
+<code>max.read.count</code> and possibly the <code>min.read.count</code>
+parameters.
+I've found that setting <code>max.read.count</code> to 10 will fix things
+a lot of the time. A more rational method for figuring out the optimal
+parameter is to look at normalized bigWig tracks in the UCSC genome browser
+to get a sense of how tall the peaks really are and use that number.
+<li>Try using a larger bin size (i.e. use <code>-b 1000</code>) for
+<code>binReads.pl</code> and <code>domainsToBed.pl</code> and re-running
+everything.
+</ol>
+</ul>
+
+</body>
+
+</html>

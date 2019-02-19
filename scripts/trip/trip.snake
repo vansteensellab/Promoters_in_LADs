@@ -1,0 +1,593 @@
+import getpass
+import datetime
+import inspect
+import os
+import re
+import yaml
+
+filename = inspect.getframeinfo(inspect.currentframe()).filename
+path = os.path.dirname(os.path.abspath(filename))
+OUTDIR = config['outdir']
+
+
+if 'extract' in config:
+    TIMING = glob_wildcards(config["extract"]["timing"])[0]
+
+
+
+def get_rep_input(config, data_type):
+    index_dict = config['sra_input'][data_type]
+    for name in index_dict:
+        for bio in index_dict[name]:
+            for i in range(0,len(index_dict[name][bio])):
+                yield('%s_%s_r%i' % (name, bio, i + 1))
+
+def get_comb_input(config, data_type):
+    index_dict = config['starcode_params']['pick'][data_type]
+    for name in index_dict:
+        for bio in index_dict[name]:
+            yield('%s_%s' % (name, bio))
+
+
+
+if 'chip_align_config' in config:
+    with open(config['chip_align_config']) as c:
+        config.update(yaml.load(c))
+        config['bed_summary'] = {}
+        for name in get_comb_input(config, 'iPCR'):
+            for window in config['signal_window']:
+                label = '%s_%i' % (name, window)
+                config['bed_summary'][label] = '%s/region/%s.bed' % (OUTDIR,
+                                                                     label)
+            config['bed_summary'][name] = '%s/sites/%s.bed' % (OUTDIR, name)
+        config['bed_nearest_domains'] = {}
+        for name in get_comb_input(config, 'iPCR'):
+            for window in config['signal_window']:
+                label = '%s_%i' % (name, window)
+                config['bed_nearest_domains'][label] = '%s/region/%s.bed' % (OUTDIR,
+                                                                     label)
+            config['bed_nearest_domains'][name] = '%s/sites/%s.bed' % (OUTDIR, name)
+
+
+    with open(config['chip_align_config']) as c:
+        config.update(yaml.load(c))
+    include: config["chip_snake"]
+
+
+
+def get_annotation_input(config, outdir):
+    calls_regex = '%s/calls/%s_%s.txt'
+    signal_regex = '%s/signal/%s_%s_%i.txt'
+    dam_regex = '%s/dam/%s_%s_%i.txt'
+    chip_regex = '%s/chip/means/%s_%i_%s_%s_%s.txt'
+    peak_regex = '%s/chip/nearest_peaks/%s_%s_%s_%s.txt'
+    domain_regex = '%s/chip/%s/%s_%s_%s_%s.txt'
+    in_list = []
+    for name in get_comb_input(config, 'iPCR'):
+        if 'calls' in config['annotation']:
+            for calls in config['annotation']['calls']:
+                yield(calls_regex % (outdir, name, calls))
+        if 'DAM' in config['annotation']:
+            for dam_type in config['annotation']['DAM']:
+                for window in config['dam_window']:
+                    yield(dam_regex % (outdir, name, dam_type, window))
+        if config['annotation']['chip']:
+            for exp_list in iter_expirements(config, config['celltype']):
+                ct, experiment, target, sample, info = exp_list
+                for window in config['signal_window']:
+                    yield(chip_regex % (outdir, name, window, experiment,
+                                        target, sample))
+        if config['annotation']['chip_domains']:
+            for exp_list in iter_expirements(config, config['celltype']):
+                ct, experiment, target, sample, info = exp_list
+                # yield(domain_regex % (outdir, 'domains_call', name, experiment,
+                #                       target, sample))
+                for width in info['hiddendomain_width']:
+                    near_dir = 'nearest_domains-%i-%s' % (width,
+                                                          info['hiddendomain_p'])
+                    yield(domain_regex % (outdir, near_dir, name, experiment,
+                                          target, sample))
+
+
+def _get_input(config, data_type, outdir):
+    if data_type == 'iPCR':
+        if 'annotation' in config:
+            for ip in get_annotation_input(config, outdir):
+                yield(ip)
+        else:
+            for name in get_comb_input(config, 'iPCR'):
+                yield('%s/iPCR/%s.2.table' % (outdir, name))
+    elif data_type == 'cDNA':
+        for name in get_rep_input(config, 'cDNA'):
+            yield('%s/cDNA/%s.normalized' % (outdir, name))
+    elif data_type == 'gDNA':
+        for name in get_rep_input(config, 'gDNA'):
+            yield('%s/gDNA/%s.starcode.count' % (outdir, name))
+    elif data_type == 'pDNA':
+        for name in get_rep_input(config, 'pDNA'):
+            yield('%s/pDNA/%s.starcode.count' % (outdir, name))
+
+def get_input(config, data_type, outdir):
+    if data_type == 'all':
+        for data_type in config['starcode_params']['pick']:
+            for ip in _get_input(config, data_type, outdir):
+                yield(ip)
+    else:
+        for ip in _get_input(config, data_type, outdir):
+            yield(ip)
+
+rule all:
+    input:
+        [ip for ip in get_input(config, 'all', OUTDIR)]
+
+
+
+if 'cDNA' in config['structure']['pick']:
+    rule cdna_only:
+        input:
+            [ip for ip in get_input(config, 'cDNA', OUTDIR)]
+
+if 'gDNA' in config['structure']['pick']:
+    rule gdna_only:
+        input:
+            [ip for ip in get_input(config, 'gDNA', OUTDIR)]
+
+if 'pDNA' in config['structure']['pick']:
+    rule pdna_only:
+        input:
+            [ip for ip in get_input(config, 'pDNA', OUTDIR)]
+
+if 'iPCR' in config['structure']['pick']:
+    rule iPCR_only:
+        input:
+            [ip for ip in get_input(config, 'iPCR', OUTDIR)]
+
+
+def get_dam_label(config, wildcards):
+    dam_dict = config['annotation']["DAM"][wildcards.experiment]
+    R = len(dam_dict['experiment']['bw'])
+    for i in range(0,R):
+        yield('exp_%i' % i)
+    for i in range(0,R):
+        yield('ctrl_%i' % i)
+
+
+def get_dam_input(config, wildcards, suffix):
+    dam_dict = config['annotation']["DAM"][wildcards.experiment]
+    for exp in dam_dict['experiment']:
+        yield('%s/%s.%s' % (config['dam_dir'], exp, suffix))
+    for dam in dam_dict['control']:
+        yield('%s/%s.%s' % (config['dam_dir'], dam, suffix))
+if 'lad_count' in config:
+    rule count_lad:
+        input:
+            a="{outdir}/sites/{bed}.bed",
+            b=config['lad_count']
+        output:
+            "{outdir}/lad_count/{bed}.txt"
+        shell:
+            "bedtools intersect -c -a {input.a} -b {input.b} > {output}"
+
+rule dam_means:
+    input:
+        bed="{outdir}/sites/{bed}.bed",
+        counts=lambda wildcards: get_dam_input(config, wildcards, 'counts.txt.gz')
+    output:
+        '{outdir}/dam/{bed}_{experiment}_{window}.txt'
+    params:
+        window='{window}'
+    run:
+        input_counts = ','.join(input.counts)
+        shell("{path}/scripts/compute_dam_region.R --window {params.window} "
+              "                                    --bed {input.bed}"
+              "                                    --counts {input_counts}"
+              "                                    --out {output}")
+
+
+
+def get_signal_dict(config):
+    if 'signal' in config['annotation']:
+        return(config['annotation']['signal']['bw'])
+    else:
+        return('')
+
+def get_signal_bw(config):
+    if 'signal' in config['annotation']:
+        return(config['annotation']['signal']['bw'].values())
+    else:
+        return('')
+
+
+def get_sure_bw(config):
+    if 'sure' in config['annotation']:
+        file_list = config['annotation']['sure'].values()
+        return('/'.join((config['sure_dir'], filename))
+               for filename in file_list)
+    else:
+        return('')
+
+def get_sure_dict(config):
+    if 'sure' in config['annotation']:
+        return(config['annotation']['sure'])
+    else:
+        return('')
+
+def get_call(config, wildcards):
+    file_list = config['annotation']['calls'][wildcards.calls]
+    return('/'.join((config['dam_dir'], file_name)) for file_name in file_list)
+
+
+if 'annotation' in config:
+    rule bw_signal:
+        input:
+            bed="{outdir}/region/{name}_{bio}_{window}.bed",
+            bw=get_signal_bw(config)
+        output:
+            "{outdir}/signal/{name}_{bio}_bw_{window}.npz",
+            "{outdir}/signal/{name}_{bio}_bw_{window}.txt"
+        params:
+            bw_dict=get_signal_dict(config)
+        threads:
+            5
+        run:
+            key_list = list(params.bw_dict.keys())
+            bw_str = ' '.join([params.bw_dict[key] for key in key_list])
+            label = ' '.join(key_list)
+            command = ("multiBigwigSummary BED-file -p %s"
+                       "                            --BED %s"
+                       "                            -l %s"
+                       "                            -b %s"
+                       "                            -out %s"
+                       "                            --outRawCounts %s")
+            shell(command % (threads, input.bed, label, bw_str,
+                             output[0], output[1]))
+    rule calls:
+        input:
+            "{outdir}/sites/{name}_{bio}.bed",
+            lambda wildcards: get_call(config, wildcards)
+        output:
+            "{outdir}/calls/{name}_{bio}_{calls}.txt"
+        shell:
+            "{path}/scripts/domain_call.R --regions {input[0]}"
+            "                             --domains {input[1]}"
+            "                             --out {output}"
+
+def get_region_input(config, wildcards):
+    map_dict = config['starcode_params']['pick']['iPCR']
+    yield("%s/iPCR/%s_%s.2.table" % (wildcards.outdir,
+                                        wildcards.name,
+                                        wildcards.bio))
+rule region_bed:
+    input:
+        "{outdir}/sites/{name}_{bio}.bed"
+    output:
+        "{outdir}/region/{name}_{bio}_{window}.bed"
+    params:
+        window= lambda wildcards: wildcards.window
+    shell:
+        "awk -vOFS='\t' '{{"
+        "    print $1, $2-({params.window}/2), $3+({params.window}/2), $4, $5, $6"
+        "}}' {input} > {output}"
+
+
+rule map_bed:
+    input:
+        lambda wildcards: get_region_input(config, wildcards)
+    output:
+        "{outdir}/sites/{name}_{bio}.bed"
+    shell:
+        "{path}/scripts/map_bed.R {input} > {output}"
+
+if 'iPCR' in config['structure']['pick']:
+    rule parse_sam:
+        input:
+            bam='{outdir}/iPCR/{name}.{num}.bam',
+            count='{outdir}/iPCR/{name}.starcode.count',
+            mutated='{outdir}/iPCR/{name}.genuine.cut'
+        output:
+            bed='{outdir}/iPCR/{name}.{num}.bed',
+            table='{outdir}/iPCR/{name}.{num}.table',
+            stats='{outdir}/iPCR/{name}.{num}.parse_stat.table',
+            length='{outdir}/iPCR/{name}.{num}.length.table',
+            remap_fq='{outdir}/iPCR/{name}.{num}.remap.fastq.gz',
+            remap='{outdir}/iPCR/{name}.{num}.remap.bam'
+        wildcard_constraints:
+            num="\d+"
+        params:
+            bowtie_index = config['bowtie']['index'],
+            options = lambda wildcards: config['bowtie']['options'][wildcards.num],
+            max_dist = lambda wildcards: config['max_dist'][wildcards.num]
+        threads: 3
+        script:
+            'scripts/parse_sam.py'
+
+    def get_rep_bam(config, wildcards):
+        map_pick = config['sra_input']['iPCR']
+        r = len(map_pick[wildcards.name][wildcards.bio])
+        for i in range(1, (r+1)):
+            yield('%s/iPCR/%s_%s_r%i.%s.bam' % (wildcards.outdir,
+                                                   wildcards.name,
+                                                   wildcards.bio,
+                                                   i, wildcards.num))
+
+
+    rule combine_bam:
+        input:
+            lambda wildcards: get_rep_bam(config, wildcards)
+        output:
+            '{outdir}/iPCR/{name}_{bio}.{num}.bam'
+        wildcard_constraints:
+            name="[^_]+",
+            bio="[^_]+",
+            num="\d+"
+        shell:
+            "samtools merge {output} {input}"
+
+    rule align:
+        input:
+            '{outdir}/iPCR/{name}_{bio}_r{rep}.{num}.fastq.gz'
+        output:
+            bam='{outdir}/iPCR/{name}_{bio}_r{rep}.{num}.bam'
+        params:
+            bowtie_index=config['bowtie']['index'],
+            options=config['bowtie']['options'],
+            num='{num}'
+        wildcard_constraints:
+            num="\d+",
+            rep="\d+"
+        threads: 10
+        log:
+            '{outdir}/iPCR/align.{name}_{bio}_r{rep}.{num}.log'
+        run:
+            gunzip = "gunzip -c {input}"
+            ## filter for read length
+            awk = ("awk '{{"
+                   "       step=NR%4;"
+                   "       if (step==0 && length(a[2])>6){{"
+                   "           for (i in a){{"
+                   "               print a[i]"
+                   "           }}"
+                   "           print $0;"
+                   "           hit+=1;"
+                   "       }} else if (step!=0){{"
+                   "           a[step]=$0;"
+                   "       }} else {{"
+                   "           short+=1"
+                   "       }}"
+                   "}} END {{"
+                   "print \"filtering before iPCR with bowtie2:\" > \"{log}\"; "
+                   "printf \"%i\\treads; of these:\\n\", hit+short > \"{log}\"; "
+                   "printf \"  %i (%2.2f%%) were long enough (> 6bp)\\n\", hit, hit/(hit+short)*100 > \"{log}\"; "
+                   "printf \"  %i (%2.2f%%) were too short (<= 6bp)\\n\\n\", short, short/(hit+short)*100 > \"{log}\"; "
+                   "print \"stats from bowtie2:\" > \"{log}\"; "
+                   "}}'")
+            options = ' '.join(params.options[params.num])
+            bowtie = 'bowtie2 -p {threads} %s -x %s -U - ' % (options,
+                                                              params.bowtie_index)
+            samToBam = 'samtools view -@ {threads} -Sb - 1> {output.bam} 2>> {log}'
+            shell('%s | %s | %s | %s' % (gunzip, awk, bowtie, samToBam))
+
+    rule split_iPCR:
+        input:
+            bam=expand('{outdir}/iPCR/{{num}}.bam', outdir=OUTDIR)
+        output:
+            '{outdir}/iPCR/{num}.genuine.bam'
+            '{outdir}/iPCR/{num}.genuine.cut.bam'
+            '{outdir}/iPCR/{num}.unmapped.bam'
+
+
+
+
+###############################################################################
+##++++++++++++++++++++++ calculate counts per million +++++++++++++++++++++++##
+###############################################################################
+
+if 'spike' in config['structure']['pick']:
+    rule normalize_mean_expression:
+        input:
+            expand('{outdir}/cDNA/{{name}}.starcode.count', outdir=OUTDIR),
+            expand('{outdir}/gDNA/{{name}}.starcode.count', outdir=OUTDIR),
+            expand('{outdir}/spike/{{name}}.starcode.count', outdir=OUTDIR)
+        output:
+            '{outdir}/cDNA/{name}.normalized'
+        params:
+            path
+        shell:
+            'Rscript {params}/scripts/normalize.R {input} {output}'
+else:
+    rule normalize_mean_expression:
+        input:
+            expand('{outdir}/cDNA/{{name}}.starcode.count', outdir=OUTDIR),
+            expand('{outdir}/gDNA/{{name}}.starcode.count', outdir=OUTDIR)
+        output:
+            '{outdir}/cDNA/{name}.normalized'
+        params:
+            path
+        shell:
+            'Rscript {params}/scripts/normalize.R {input} {output}'
+
+rule normalize_polyA:
+    input:
+        lambda wildcards: config['input_file']['polyA'][wildcards.name][0],
+        expand('{outdir}/polyA/{{name}}.starcode.count', outdir=OUTDIR)
+    output:
+        '{outdir}/polyA/{name}.normalized'
+    shell:
+        "total_reads=$(($(gunzip -c {input[0]} | wc -l) / 4));"
+        "awk -v total_reads=\"$total_reads\" '{{"
+        "    norm=$2/total_reads * 1000000;"
+        "    print $0\"\t\"norm"
+        "}}' {input[1]} > {output}"
+
+
+
+###############################################################################
+##++++++++++++++++++++++++ select genuine barcodes ++++++++++++++++++++++++++##
+###############################################################################
+
+rule starcode_ref:
+    input:
+        '{outdir}/{data_type}/{name}_{bio}.raw.count'
+    output:
+        gen='{outdir}/{data_type}/{name}_{bio}.starcode.count',
+        mut='{outdir}/{data_type}/{name}_{bio}.genuine.cut',
+        count='{outdir}/{data_type}/{name}_{bio}.count.cut'
+    wildcard_constraints:
+        name="[^_]+",
+        bio="[^_]+"
+    params:
+        lev_dist = config['lev_dist'],
+        use_other = False,
+        count = 0
+    threads:
+        3
+    script:
+        'scripts/starcode.py'
+
+def get_sum_input(config, wildcards):
+    data_type = wildcards.data_type
+    name=wildcards.name
+    bio= wildcards.bio
+    rep_n = len(config['starcode_params']['pick'][data_type][name])
+    return(['%s/%s/%s_%s_r%i.raw.count' % (wildcards.outdir, data_type,
+                                           name, bio,  i+1)
+            for i in range(0, rep_n)])
+
+
+rule sum_raw_count:
+    input:
+        lambda wildcards: get_sum_input(config, wildcards)
+    output:
+        '{outdir}/{data_type}/{name}_{bio}.raw.count'
+    wildcard_constraints:
+        name="[^_]+",
+        bio="[^_]+"
+    shell:
+        "awk -vOFS='\t' "
+        "'{{"
+        "   arr[$1] += $2"
+        "}} END {{"
+        "   for (bc in arr){{"
+        "       print bc, arr[bc]"
+        "}}}}' {input} > {output}"
+
+def get_starcode_input(config, wildcards):
+    pick_dict = config['starcode_params']['pick'][wildcards.data_type]
+    pick = pick_dict[wildcards.name][wildcards.bio]
+    param_dict = config['starcode_params']['options'][pick]
+    other = param_dict['other']
+    yield('%s/%s/%s_%s_r%s.raw.count' % (wildcards.outdir, wildcards.data_type,
+                                         wildcards.name, wildcards.bio,
+                                         wildcards.rep))
+    if config['starcode_params']['options'][pick]['use_other']:
+        yield('%s/%s/%s_%s.starcode.count' % (wildcards.outdir, other,
+                                              wildcards.name, wildcards.bio))
+
+def get_starcode_params(config, wildcards):
+    params = config['starcode_params']
+    pick = params['pick'][wildcards.data_type][wildcards.name][wildcards.bio]
+    return(params['options'][pick])
+
+rule starcode:
+    input:
+        lambda wildcards: get_starcode_input(config, wildcards)
+    output:
+        gen = '{outdir}/{data_type}/{name}_{bio}_r{rep}.starcode.count',
+        mut = '{outdir}/{data_type}/{name}_{bio}_r{rep}.genuine.cut',
+        count = '{outdir}/{data_type}/{name}_{bio}_r{rep}.count.cut',
+    params:
+        param_dict=lambda wildcards: get_starcode_params(config, wildcards),
+        not_other = '{outdir}/{data_type}/{name}_{bio}_r{rep}.in_ref.cut',
+        not_this = '{outdir}/{data_type}/{name}_{bio}_r{rep}.in_this.cut'
+    threads:
+        4
+    script:
+        'scripts/starcode.py'
+
+
+rule count_barcode:
+    input:
+        '{outdir}/{name}_{bio}_r{rep}.barcode.txt.gz'
+    output:
+        '{outdir}/{name}_{bio}_r{rep}.raw.count'
+    wildcard_constraints:
+        rep="\d+"
+    shell:
+        "{path}/scripts/count_barcode.sh {input} > {output}"
+
+###############################################################################
+##+++++++++++++++++++++++++++++++ parse reads +++++++++++++++++++++++++++++++##
+###############################################################################
+
+def get_structure(config, wildcards, data_type):
+    pick = config['structure']['pick'][data_type][wildcards.name]
+    return(config['structure']['options'][pick])
+
+
+ruleorder: parse_ipcr > parse_gcDNA
+
+rule parse_ipcr:
+    input:
+        lambda wildcards: get_raw_input(config, wildcards, 'iPCR')
+    output:
+        '{outdir}/iPCR/{name}_{bio}_r{rep}.barcode.txt.gz',
+        '{outdir}/iPCR/{name}_{bio}_r{rep}.1.fastq.gz',
+        '{outdir}/iPCR/{name}_{bio}_r{rep}.2.fastq.gz',
+        '{outdir}/iPCR/{name}_{bio}_r{rep}.statistics.txt',
+        structure = '{outdir}/iPCR/{name}_{bio}_r{rep}.structure.txt'
+    log:
+        '{outdir}/iPCR/{name}_{bio}_r{rep}_parser.log'
+    wildcard_constraints:
+        rep="\d+"
+    params:
+        struct_dict= config['structure'],
+        outdir = '{outdir}',
+        name = '{name}',
+        parser = config['parser'],
+        data_type = 'iPCR'
+    run:
+        pick = params.struct_dict['pick'][params.data_type][params.name]
+        print(input)
+        structure = params.struct_dict['options'][pick].replace('\\', '')
+        with open(output.structure, 'w') as f:
+            f.write(structure)
+        shell('{params.parser} -r -x -a -n 100 -l {log} '
+              '-p {input[1]} -b {params.data_type}/'
+              '{wildcards.name}_{wildcards.bio}_r{wildcards.rep} '
+              '{input[0]} {output.structure} {params.outdir}')
+
+rule parse_gcDNA:
+    input:
+        lambda wildcards: get_raw_input(config, wildcards, wildcards.data_type)
+    output:
+        '{outdir}/{data_type}/{name}_{bio}_r{rep}.barcode.txt.gz',
+        '{outdir}/{data_type}/{name}_{bio}_r{rep}.statistics.txt',
+        structure = '{outdir}/{data_type}/{name}_{bio}_r{rep}.structure.txt'
+    log:
+        '{outdir}/{data_type}/{name}_{bio}_r{rep}_parser.log'
+    params:
+        struct_dict= config['structure'],
+        outdir = '{outdir}',
+        name = '{name}',
+        parser = config['parser'],
+        data_type = '{data_type}'
+    run:
+        pick = params.struct_dict['pick'][params.data_type][params.name]
+        structure = params.struct_dict['options'][pick].replace('\\', '')
+        with open(output.structure, 'w') as f:
+            f.write(structure)
+        shell('{params.parser} -a -n 100 -r -x -l {log} '
+              '-b {params.data_type}/{wildcards.name}_{wildcards.bio}_'
+              'r{wildcards.rep} {input} {output.structure} '
+              '{params.outdir}')
+
+def get_raw_input(config, wildcards, data_type):
+    input_dict = config['sra_input'][data_type][wildcards.name]
+    sra_list = input_dict[wildcards.bio]
+    rep = int(wildcards.rep)
+    sra = sra_list[rep-1]
+    if data_type == 'iPCR':
+        return('%s/raw_data/%s_%i.fastq.gz' % (wildcards.outdir, sra, i)
+               for i in range(1,3))
+    else:
+        return('%s/raw_data/%s.fastq.gz' % (wildcards.outdir, sra))
