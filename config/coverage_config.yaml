@@ -1,0 +1,42 @@
+outdir:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/data/promoter_chip'
+
+bed_summary:
+    gencode.v27_tssr:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_tss.bed'
+    gencode.v27_body:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_gene_body.bed'
+    gencode.v27_1kb:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_1kb.bed'
+    gencode.v27_5kb:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_5kb.bed'
+    genehancer.4.6_5kb:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/genehancer.v4.6_5kb.bed'
+bed_window:
+    gencode.v27:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/selection/gencode.v27_fantom_selection.bed'
+
+bed_nearest_domains:
+    gencode.v27:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_tss.bed'
+    genehancer.v4.6:
+        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/genehancer.v4.6_center.bed'
+
+window_params:
+    gencode.v27:
+        a: 22000
+        b: 22000
+        binsize: 100
+        refpoint: [TSS]
+
+genome: hg38
+
+celltype: 'K562'
+
+chip_dir:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/data/chip'
+
+chip_align_config:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/config/align_config.yaml'
+chip_align:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/scripts/chip/chip_align.snakemake'

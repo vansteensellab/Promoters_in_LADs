@@ -1,0 +1,104 @@
+# knitr document van Steensel lab
+
+# Modes and mechanisms of gene regulation in lamina-associated domains
+## Christ Leemans, 03-11-2016 - 26-07-2017
+
+
+## promoter selection
+First we have to select our promoters. Previously Joris used gencode dataset and
+selected promoters for which there was also expression in CAGE in at least one
+cell type. I don't see any reason not to keep using this method.
+
+```{r}
+library(knitr)
+library(rtracklayer)
+library(data.table)
+print(getwd())
+input_tss = opt[[3]]
+input_exp = opt[[4]]
+input_gff = opt[[5]]
+output_txt = opt[[6]]
+output_gff = opt[[7]]
+output_bed = opt[[8]]
+
+
+
+P = read.table(input_tss, stringsAsFactors=F,
+               col.names=c('seqnames', 'tss', 'transcript_id', 'strand',
+                           'gene_id'))
+rownames(P) = P$transcript_id
+P = P[!P$seqnames %in% c('chrM', 'chrY'),  ]
+
+
+fantom_count = read.table(input_exp, stringsAsFactors=T,
+                          col.names=c('transcript_id', 'sum',
+                                      'tissues_expressed'))
+fantom_table = data.table(fantom_count)
+setkey(fantom_table, transcript_id)
+fantom_high = fantom_table[, list(sum=max(sum),
+                                  tissues_expressed=max(tissues_expressed)),
+                           by=key(fantom_table)]
+
+P$sum_fantom = unlist(fantom_high[P$transcript_id, 'sum'])
+P$tissues_expressed = unlist(fantom_high[P$transcript_id, 'tissues_expressed'])
+
+most_active <- function(P){
+    p_table = as.data.table(P)
+    max_sum = p_table[, list(transcript_id=transcript_id[which.max(sum_fantom)]),
+                      by=gene_id]
+    return(as.vector(unlist(max_sum$transcript_id)))
+}
+
+p_active = most_active(P)
+p_other = P[!rownames(P)%in%p_active, ]
+p_new_names = p_active
+
+while (nrow(p_other) > 0){
+    p_new = P[p_new_names, ]
+    active_gr = makeGRangesFromDataFrame(p_new, start.field = "tss",
+                                         end.field="tss", keep.extra.columns=TRUE)
+    other_gr = makeGRangesFromDataFrame(p_other, start.field = "tss",
+                                         end.field="tss", keep.extra.columns=TRUE)
+    o = findOverlaps(active_gr,other_gr, maxgap=500, ignore.strand=FALSE)
+    p_other = p_other[-subjectHits(o), ]
+    p_active = most_active(p_other)
+    p_other = p_other[!rownames(p_other)%in%p_active, ]
+    p_new_names = c(p_new_names, p_active)
+}
+
+p_complete = P
+
+P = P[rownames(P) %in% p_new_names, ]
+gencode_gr = import.gff(input_gff)
+
+
+## There are some overlapping gene annotations, this will only bring confusion.
+## let's pick the smallest gene.
+match_vec = match(rownames(P), gencode_gr$ID)
+width_vec = width(gencode_gr[match_vec])
+p_overlap = aggregate(1:nrow(P), by=list(P$seqnames, P$tss, P$strand), function(x){
+    if (length(x) > 1){
+        x = x[which.min(width_vec[x])[1]]
+    }
+    return(x)
+})
+
+P = P[sort(p_overlap$x), ]
+
+write.table(P, output_txt,
+            quote=F, sep='\t', col.names=F, row.names=F)
+
+
+
+
+
+p_gr = gencode_gr[which(gencode_gr$transcript_id %in% rownames(P))]
+export.gff(p_gr, output_gff)
+
+p_bed_gr = gencode_gr[gencode_gr$ID %in% rownames(P)]
+p_bed_gr$name = as.character(p_bed_gr$ID)
+score(p_bed_gr) = 0
+
+export.bed(p_bed_gr, output_bed)
+
+```

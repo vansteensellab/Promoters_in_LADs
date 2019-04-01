@@ -1,0 +1,311 @@
+# Configuration file for mapping of Thetered-TRIP experiments performed in K562 cells.
+# This configuration contains all configurations used by the pipeline.
+# Different parts of the pipeline use this configuration:
+#
+# snakemake:
+#   this part mainly contains input files and a description of each file
+#   the following input files are used:
+#     - cDNA:
+#         fastq files with cDNA reads of barcoded reporters
+#     - gDNA:
+#         fastq files with gDNA reads of barcoded reporters used to normalize the cDNA (cDNA) reads
+#     - spike-in:
+#         fastq file with only reads of the spike-in library which was mixed in with the cDNA and gDNA reads.
+#     - forward_mapping:
+#         fastq files with forward iPCR reads of reporter integrations containing barcodes.
+#     - reverse_mapping:
+#         fastq files with reverse iPCR reads of reporter integrations with intergration site.
+
+###############################
+### snakemake configuration ###
+###############################
+outdir: '/DATA/usr/c.leemans/projects/Promoters_in_LADs/data/trip'
+
+
+
+###############################################################################
+###++++++++++++++++++++++++++++ parser settings ++++++++++++++++++++++++++++###
+###############################################################################
+# Typical structure of gDNA and cDNA reads:
+#      index            pat1               barcode           pat2
+# NNNNNNNNNNGTCACAAGGGCCGGCCACAACTCGAGNNNNNNNNNNNNNNNNTGATCCTGCAGTGTCACC...
+#
+# settings:
+#   barcode_length -- the length of the barcode
+#   pat1 -- the first constant pattern (after index, before barcode)
+#   pat2 -- the pattern after the barcode
+# #****************************************************************************
+# Typical structures of mapping reads
+#
+# Forward Read:
+#
+# format_map1
+#      index   	        pat1             barcode     pat2		genomic DNA
+# NNNNNNNNNNGTCACAAGGGCCGGCCACAACTCGAGNNNNNNNNNNNNNNNNTGATCNNNNNNNNNNNNNNNNNNNN
+#
+# Reverse Read:
+# 	     map_pat_rev					     genomic DNA
+# GTACGTCACAATATGATTATCTTTCTAGGGTTAANNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN
+
+
+
+
+
+sra_input:
+    iPCR:
+        ADAMTS1:
+            A: [SRX4994458, SRX4994459]
+            B: [SRX4994456, SRX4994457]
+        ARHGEF9:
+            A: [SRX4994392, SRX4994393]
+            B: [SRX4994384, SRX4994385]
+        BRINP1:
+            A: [SRX4994421, SRX4994422]
+            B: [SRX4994415, SRX4994416]
+        MED30:
+            A: [SRX4994417, SRX4994418]
+            B: [SRX4994441, SRX4994442]
+        PGK:
+            A: [SRX4994449, SRX4994450]
+            B: [SRX4994435, SRX4994436]
+        TMEM106B:
+            A: [SRX4994474, SRX4994475]
+            B: [SRX4994480, SRX4994481]
+        ZNF300:
+            A: [SRX4994468, SRX4994469]
+            B: [SRX4994462, SRX4994463]
+    cDNA:
+        ADAMTS1:
+            A: [SRX4994460, SRX4994461]
+            B: [SRX4994452, SRX4994453]
+        ARHGEF9:
+            A: [SRX4994386, SRX4994387]
+            B: [SRX4994425, SRX4994426]
+        BRINP1:
+            A: [SRX4994423, SRX4994424]
+            B: [SRX4994413, SRX4994414]
+        MED30:
+            A: [SRX4994411, SRX4994412]
+            B: [SRX4994447, SRX4994448]
+        PGK:
+            A: [SRX4994431, SRX4994432]
+            B: [SRX4994437, SRX4994438]
+        TMEM106B:
+            A: [SRX4994476, SRX4994477]
+            B: [SRX4994472, SRX4994473]
+        ZNF300:
+            A: [SRX4994466, SRX4994467]
+            B: [SRX4994403, SRX4994404]
+    gDNA:
+        ADAMTS1:
+            A: [SRX4994454, SRX4994455]
+            B: [SRX4994390, SRX4994391]
+        ARHGEF9:
+            A: [SRX4994388, SRX4994389]
+            B: [SRX4994427, SRX4994428]
+        BRINP1:
+            A: [SRX4994429, SRX4994430]
+            B: [SRX4994419, SRX4994420]
+        MED30:
+            A: [SRX4994443, SRX4994444]
+            B: [SRX4994445, SRX4994446]
+        PGK:
+            A: [SRX4994433, SRX4994434]
+            B: [SRX4994439, SRX4994440]
+        TMEM106B:
+            A: [SRX4994478, SRX4994479]
+            B: [SRX4994470, SRX4994471]
+        ZNF300:
+            A: [SRX4994464, SRX4994465]
+            B: [SRX4994401, SRX4994402]
+
+
+
+
+lev_dist: 2
+
+min_count:
+  spike: 1000
+  gDNA: 5
+  cDNA: 0
+  map: 3
+
+
+
+starcode_params:
+    options:
+        iPCR:
+            lev_dist: 2
+            use_other: True
+            other: gDNA
+            count: 3
+        gDNA:
+            lev_dist: 2
+            use_other: True
+            other: gDNA
+            count: 5
+        cDNA:
+            lev_dist: 2
+            use_other: True
+            other: gDNA
+            count: 0
+    pick:
+        iPCR:
+            ADAMTS1:
+                A: iPCR
+                B: iPCR
+            ARHGEF9:
+                A: iPCR
+                B: iPCR
+            BRINP1:
+                A: iPCR
+                B: iPCR
+            MED30:
+                A: iPCR
+                B: iPCR
+            PGK:
+                A: iPCR
+                B: iPCR
+            TMEM106B:
+                A: iPCR
+                B: iPCR
+            ZNF300:
+                A: iPCR
+                B: iPCR
+        cDNA:
+            ADAMTS1:
+                A: cDNA
+                B: cDNA
+            ARHGEF9:
+                A: cDNA
+                B: cDNA
+            BRINP1:
+                A: cDNA
+                B: cDNA
+            MED30:
+                A: cDNA
+                B: cDNA
+            PGK:
+                A: cDNA
+                B: cDNA
+            TMEM106B:
+                A: cDNA
+                B: cDNA
+            ZNF300:
+                A: cDNA
+                B: cDNA
+        gDNA:
+            ADAMTS1:
+                A: gDNA
+                B: gDNA
+            ARHGEF9:
+                A: gDNA
+                B: gDNA
+            BRINP1:
+                A: gDNA
+                B: gDNA
+            MED30:
+                A: gDNA
+                B: gDNA
+            PGK:
+                A: gDNA
+                B: gDNA
+            TMEM106B:
+                A: gDNA
+                B: gDNA
+            ZNF300:
+                A: gDNA
+                B: gDNA
+
+structure:
+    options:
+        iPCR: |
+            ID      5'      3'      type    req     second-read     pos   keep-bases
+            index   10      -       const   present False  fixed -
+            map_pat1a       GTCACAAGGGCCGGCCACAAC   -       const   present False   fixed   -
+            const_bar       TCGAG\{16\}TGATC  -       const_bar       present False   fixed   -
+            rev_map_complement      -       TTAACCCTAGAAAGATAATCATATTGTGACGTAC      const   -       False   var   -
+            rev_map GTACGTCACAATATGATTATCTTTCTAGGGTTAA      -       const   present True    fixed   -
+            fwd_map_complement      -       GATCA[BC]CTCGAGTTGTGGCCGGCCCTTGTGAC     const_bar_comp  -       True    var   -
+        gcDNA: |
+            ID      5'      3'      type    req     second-read     pos                   keep-bases
+            index   10      -       const   present False  fixed -
+            pat1    GTCACAAGGGCCGGCCACAACTCGAG      -       const   present False   fixed   -
+            barcode 16      -       barcode present False   fixed   -
+            pat2    TGATCCTGCAGTG   -       const   present False   var   -
+    pick:
+        iPCR:
+            ADAMTS1: iPCR
+            ARHGEF9: iPCR
+            BRINP1: iPCR
+            MED30: iPCR
+            PGK: iPCR
+            TMEM106B: iPCR
+            ZNF300: iPCR
+        cDNA:
+            ADAMTS1: gcDNA
+            ARHGEF9: gcDNA
+            BRINP1: gcDNA
+            MED30: gcDNA
+            PGK: gcDNA
+            TMEM106B: gcDNA
+            ZNF300: gcDNA
+        gDNA:
+            ADAMTS1: gcDNA
+            ARHGEF9: gcDNA
+            BRINP1: gcDNA
+            MED30: gcDNA
+            PGK: gcDNA
+            TMEM106B: gcDNA
+            ZNF300: gcDNA
+
+
+bowtie:
+  index: /DATA/usr/c.leemans/data/hg38/hg38_1-22_XYM
+  options:
+      '1': ['--very-sensitive']
+      '2': ['--very-sensitive-local']
+
+
+max_dist:
+    '1': 500
+    '2': 20
+
+parser: /DATA/usr/c.leemans/projects/Promoters_in_LADs/scripts/read_parsing/read_parser.py
+
+
+annotation:
+    calls:
+        LMNB1:
+            - HMM/bin-5kb/K562_LMNB1-5kb-combined_AD.bed.gz
+    DAM:
+        LMNB1:
+            experiment:
+                - counts/bin-gatc/K562_r1_LMNB1-gatc
+                - counts/bin-gatc/K562_r2_LMNB1-gatc
+            control:
+                - counts/bin-gatc/K562_r1_Dam16-gatc
+                - counts/bin-gatc/K562_r2_Dam10_1-gatc
+    chip: True
+    chip_domains: True
+
+sure_dir: /DATA/usr/c.leemans/data/tracks/hg38
+dam_dir: /DATA/usr/t.v.schaik/proj/3D_nucleus/results/ts180110_4DN_DataProcessing/results
+
+signal_window: [5000]
+dam_window: [10000]
+
+genome: hg38
+
+celltype: 'K562'
+
+chip_dir:
+    '/DATA/usr/c.leemans/projects/chip_snake/'
+
+
+chip_align_config:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/config/align_config.yaml'
+chip_align:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/scripts/chip/chip_align.snakemake'
+chip_snake:
+    '/DATA/usr/c.leemans/projects/Promoters_in_LADs/scripts/chip/chip_coverage.snakemake'

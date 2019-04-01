@@ -44,10 +44,6 @@ COL<-c("#A020F0", "#FFA500", "#006400")
 names(COL)<-c("repressed", "escaper", "inactive")
 
 
-P_pro_body = read.table(paste0(basedir, '/data/lad_promoters/expression/',
-                               'gencode.v27_proseq_body.tsv'),
-                        stringsAsFactors=F, header=T)
-
 P_exp = read.table(paste0(basedir, '/data/lad_promoters/expression/',
                           'gencode.v27_stranded_expression.txt.gz'),
                        stringsAsFactors=F, header=T, row.names=1)

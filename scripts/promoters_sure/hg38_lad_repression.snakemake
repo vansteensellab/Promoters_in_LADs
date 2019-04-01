@@ -28,20 +28,18 @@ rule all:
                a=config['window_param']['a'],
                b=config['window_param']['b'],
                bs=config['window_param']['bs']),
-        expand("{outdir}/window/{name}_{signal}_scaled-window.txt.gz",
-               outdir=config['outdir'],
-               name=list(config["transcripts"].keys()),
-               signal=config["scaled_window"].keys()),
         expand("{outdir}/expression/{name}_stranded_expression.txt.gz",
                outdir=config['outdir'],
                name=list(config["transcripts"].keys()) +
-                    list(config["enhancers"].keys()) +
-                    list(config["dnase"].keys())),
+                    list(config["enhancers"].keys())),
+        expand("{outdir}/tssr_body_exp/{name}_{type}.txt.gz",
+               outdir=config['outdir'],
+               type=('gene_body', 'tssr'),
+               name=list(config["transcripts"].keys())),
         expand("{outdir}/domains/{name}_domains.txt",
                outdir=config['outdir'],
                name=list(config["transcripts"].keys()) +
-                    list(config["enhancers"].keys()) +
-                    list(config["dnase"].keys())),
+                    list(config["enhancers"].keys())),
         expand("{outdir}/tssr_gene_body/{name}_tssr.bed",
                outdir=config['outdir'],
                name=list(config["transcripts"].keys())),
@@ -54,6 +52,36 @@ rule center_region:
         '{outdir}/tssr_gene_body/{name}_center.bed'
     shell:
         "awk -vOFS='\t' '{{print $1, $2-150, $2+150, $3}}' {input} > {output}"
+
+
+
+rule tssr_body_exp:
+    input:
+        region='{outdir}/tssr_gene_body/{name}_{type}.bed',
+        bw=lambda wildcards: list(get_stranded_input(config, wildcards,
+                                                     'tss_body_expression'))
+    output:
+        npz=temp("{outdir}/tssr_body_exp/{name, [^_]+}_{type}.npz"),
+        tab=temp("{outdir}/tssr_body_exp/{name, [^_]+}_{type}.tab.gz"),
+        out="{outdir}/tssr_body_exp/{name, [^_]+}_{type}.txt.gz"
+    params:
+        up=500,
+        down=500,
+        labels=lambda wildcards:list(get_stranded_labels(config, wildcards,
+                                                         'tss_body_expression'))
+    threads:
+        10
+    message:
+        "calculating mean expression of {wildcards.type} region  "
+        "downstream of {wildcards.name} TSS's and separating by sense/antisense"
+    shell:
+        "multiBigwigSummary BED-file -b {input.bw} --BED {input.region} "
+        "                            -p {threads} -l {params.labels} "
+        "                            -out {output.npz} "
+        "                            --outRawCounts {output.tab}; "
+        "{path}/scripts/region_to_id.awk {output.tab} {input.region} > {output.out}"
+
+
 
 ## get multiple bed files:
 ## [selection]_tssr.bed: region around the TSS (-50:+300)
@@ -101,7 +129,10 @@ rule domain_join:
         label_list = [re.search('.*_(.*_.*).txt', f).groups()[0]
                       for f in input]
         header = '\t'.join(["ID"] + label_list)
-        join_cmd = "join -t $'\\t' {input[0]} {input[1]}"
+        if len(input) > 1:
+            join_cmd = "join -t $'\\t' {input[0]} {input[1]}"
+        else:
+            join_cmd = "echo {input[0]}"
         if len(input) > 2:
             for i in range(2, len(input)):
                 join_cmd = ' | '.join((join_cmd,
@@ -139,44 +170,6 @@ def get_bed(config, wildcards):
     else:
         return('%s/selection/%s_selection.bed' % (wildcards.outdir,
                                                   wildcards.name))
-
-rule scaled_matrix:
-    input:
-        window=lambda wildcards: config['scaled_window'][wildcards.signal],
-        bed=lambda wildcards: get_bed(config, wildcards)
-    output:
-        '{outdir}/window/{name}_{signal}_scaled-window.txt.gz'
-    message:
-        "extracting matrix of {params.type} {wildcards.signal} signal {params.up}bp "
-        "upstream and {params.down}bp downstream of {wildcards.name} TSS's "
-        "in bins of {params.binsize}bp."
-    params:
-        binsize=config['scaled_param']['bs'],
-        up=config['scaled_param']['b'],
-        down=config['scaled_param']['a'],
-        unscaled3=config['scaled_param']['unscaled3'],
-        unscaled5=config['scaled_param']['unscaled5'],
-        body_length=config['scaled_param']['body_length'],
-        missingDataAsZero=lambda wildcards: config['missingDataAsZero'][wildcards.signal],
-        type=lambda wildcards: config['window_type'][wildcards.signal]
-    threads:
-        10
-    run:
-        cmd = ("computeMatrix scale-regions -S {input.window} "
-               "                            -R {input.bed} "
-               "                            -p {threads}"
-               "                            --sortRegions keep"
-               "                            --averageTypeBins {params.type}"
-               "                            --binSize={params.binsize}"
-               "                            -a {params.down} -b {params.up} "
-               "                            --unscaled3prime {params.unscaled3}"
-               "                            --unscaled5prime {params.unscaled5}"
-               "                            -m {params.body_length}"
-               "                            --outFileName {output}")
-        if params.missingDataAsZero:
-            cmd = ' '.join((cmd, '--missingDataAsZero'))
-        shell(cmd)
-
 
 
 rule compute_matrix:
@@ -221,15 +214,15 @@ rule compute_matrix:
 
 
 ## sum counts around TSS's for stranded expression files (e.g. SuRE and GROcap)
-def get_stranded_input(config, wildcards):
-    for key in config['expression']:
-        file_dict = config['expression'][key]
+def get_stranded_input(config, wildcards, exp_type='expression'):
+    for key in config[exp_type]:
+        file_dict = config[exp_type][key]
         for strand in file_dict:
             yield('%s/%s' % (config['input'], file_dict[strand]))
 
-def get_stranded_labels(config, wildcards):
-    for key in config['expression']:
-        file_dict = config['expression'][key]
+def get_stranded_labels(config, wildcards, exp_type='expression'):
+    for key in config[exp_type]:
+        file_dict = config[exp_type][key]
         for strand in file_dict:
             yield('%s_%s' % (key, strand))
 
@@ -366,21 +359,6 @@ rule gff_to_tss_bed:
         "{path}/scripts/gff_to_tss_bed.sh {input} > {output}"
 
 
-rule dnase_refpoint:
-    input:
-        lambda wildcards: get_refpoint(config, "dnase.%s" % (wildcards.group))
-    output:
-        txt="{outdir}/selection/dnase.{group, [^_]+}_selection.txt",
-        bed="{outdir}/selection/dnase.{group, [^_]+}_selection.bed"
-    shell:
-        "zcat {input} | "
-        "    tail -n+2 | "
-        "    awk -vOFS='\t' -vtxt={output.txt} -vbed={output.bed} -F'\t|;' '{{"
-        "        centre=int(($2 + $3) / 2);"
-        "        print $1, $2, $3, $1\":\"centre, \"0\", \".\" > bed;"
-        "        print $1, centre, $1\":\"centre > txt}}'"
-
-ruleorder: dnase_refpoint > genehancer_refpoint
 
 def get_refpoint(config, name):
     if name in config["enhancers"]:

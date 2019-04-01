@@ -58,7 +58,7 @@ names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
 COL<-c("#A020F0", "#FFA500", "#006400")
 names(COL)<-c("repressed", "escaper", "inactive")
 
-P_pro_tssr = read.table(paste0(basedir, '/data/lad_promoters/expression/',
+P_pro_tssr = read.table(paste0(basedir, '/data/promoter_expression/expression/',
                                'gencode.v27_proseq_tssr.tsv'),
                         stringsAsFactors=F, header=T)
 
