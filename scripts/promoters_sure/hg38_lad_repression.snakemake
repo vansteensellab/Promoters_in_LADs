@@ -132,7 +132,7 @@ rule domain_join:
         if len(input) > 1:
             join_cmd = "join -t $'\\t' {input[0]} {input[1]}"
         else:
-            join_cmd = "echo {input[0]}"
+            join_cmd = "cat {input[0]}"
         if len(input) > 2:
             for i in range(2, len(input)):
                 join_cmd = ' | '.join((join_cmd,

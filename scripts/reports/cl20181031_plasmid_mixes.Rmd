@@ -1,0 +1,523 @@
+# r document van Steensel lab
+
+# Gene repression in LADs
+## Christ Leemans, 22-08-2018
+
+## Introduction
+We have performed TRIP with 3 escapers and 3 repressed promoters.
+To test relative expression of the TRIP constructs before integration, Marloes
+measured RNA expression from transfected plasmids.
+
+First she mixed the 6 promoters in different ratio's (1:1:1:1:1:1 and 1:2:1:2:1:2).
+Unfortunately there was a mix up of samples however, so in the end 1 replicate of
+each ratio was found to be correctly labeled.
+
+Because of this and because we wanted to add the hPGK which we used as a reference
+for a promoter which is really insensitive to chromatin context.
+
+Unfortunately the first time this was attempted, the plasmids didn't contain any
+promoter. The second try however was successful. But although within each promoter
+there was a very narrow distribution, like previous analysis, some promoters have
+shifted in the expression that was predicted from this experiment compared to
+previous experiments.
+
+Although this is very unfortunate, it does not hinder the conclusions that we
+would like to draw from this date, namely that:
+1 ) the escaper promoters do not escape simply because they are more active
+2 ) the range of expression observed in the TRIP pools can not be explained by
+    barcode effects.
+
+## individual plasmid PCR's
+
+plasmids from each promoter were sequenced separately to link each barcode to
+a promoter
+```{r}
+library(ggbeeswarm)
+library(ggplot2)
+library(reshape2)
+library(plyr)
+library(rtracklayer)
+library(subSeq)
+library(data.table)
+library(grid)
+
+COLi<-"#00BBFF11" #dot color for iLAD promoters
+COL_lad<-c("#FF0000", "#0077FF")
+names(COL_lad)<-c('LAD', 'iLAD')
+
+#color vector for plotting:
+COL_class<-c("#A020F0", "#FFA500", "#006400", "#7e7e7e", "#0077FF")
+names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
+
+
+single_files = list.files('../../trip/cl20180813_TRIP_transient_mix/gDNA',
+                          pattern='^[0-9hPGK]+_.*.starcode.count', full.names=T)
+names(single_files) = gsub('.*gDNA/(.*).starcode.count', '\\1', single_files)
+
+single_info = data.frame(row.names=names(single_files),
+                         promoter=gsub('(.+?)_.*', '\\1', names(single_files)),
+                         rep = gsub('.+?_A_r([0-9]).*', '\\1', names(single_files)),
+                         stringsAsFactors=F)
+
+
+single_table_list = lapply(names(single_files), function(name){
+        df = read.table(single_files[name], stringsAsFactors=F, fill=T)
+        return(data.frame(barcode=df[,1],
+                          starcount=df[,2],
+                          promoter=single_info[name,'promoter'],
+                          rep = single_info[name,'rep'],
+                          stringsAsFactors=F))
+    })
+
+prom_name = c('6'='ADAMTS1', '8'='TMEM106B', '9'='MED30', '11'='ARHGEF9',
+              '12'='ZNF300', '10'='BRINP1', 'hPGK'='hPGK')
+class_vec = c('6'='repressed', '8'='escaper', '9'='escaper', '11'='repressed',
+              '12'='escaper', '10'='repressed', 'hPGK'='iLAD')
+
+single_list = lapply(unique(single_info$promoter), function(prom){
+    i_vec = which(single_info$promoter==prom)
+    this_list = single_table_list[i_vec]
+    rep1 = this_list[[1]]
+    rep2 = this_list[[2]]
+    bc_1 = rep1$barcode[rep1$starcount > 100]
+    bc_2 = rep2$barcode[rep2$starcount > 100]
+    bc_vec = bc_1[bc_1%in%bc_2]
+    data.frame(row.names= bc_vec,
+               promoter = rep(prom, length(bc_vec)),
+               prom_name = prom_name[prom],
+               class = class_vec[prom],
+               stringsAsFactors=F)
+})
+
+single_table = do.call(rbind, single_list)
+
+
+```
+
+
+```{r}
+
+
+parse_norm_files <- function(norm_files){
+    names(norm_files) = gsub('.*cDNA/(.*).normalized', '\\1', norm_files)
+
+
+    norm_info = data.frame(row.names=names(norm_files),
+                           mix=gsub('(.+?)_.*', '\\1', names(norm_files)),
+                           bio_rep = gsub('.+?_(.+?)_.*', '\\1', names(norm_files)),
+                           tech_rep = gsub('.+?_.+?_r([^.]*).*', '\\1', names(norm_files)),
+                           stringsAsFactors=F)
+    norm_table_list = lapply(norm_files, read.table, row.names=1, header=T,
+                             stringsAsFactors=F)
+    names(norm_table_list) = names(norm_files)
+
+    norm_list = lapply(unique(norm_info$mix), function(mix){
+        this_info = norm_info[norm_info$mix==mix, ]
+        bio_list = lapply(unique(this_info$bio), function(bio){
+            name_vec = rownames(this_info)[this_info$bio==bio]
+            rep1 = norm_table_list[[name_vec[1]]]
+            rep2 = norm_table_list[[name_vec[2]]]
+            bc1 = rownames(rep1)
+            bc2 = rownames(rep2)
+            bc_vec = bc1[bc1%in%bc2]
+
+            colnames(rep1) = paste0(colnames(rep1), '_1')
+            colnames(rep2) = paste0(colnames(rep2), '_2')
+
+            rep_df = data.frame(barcode=bc_vec,
+                                rep1[bc_vec, ],
+                                rep2[bc_vec, ],
+                                mix=mix,
+                                bio=bio,
+                                single_table[bc_vec, ],
+                                stringsAsFactors=F)
+            print(ggplot(rep_df, aes(x=log2(normalized_by_gDNA_1),
+                                     y=log2(normalized_by_gDNA_2))) +
+                   geom_point(alpha=0.5))
+            rep_df$norm = rowMeans(rep_df[,c('normalized_by_gDNA_1',
+                                             'normalized_by_gDNA_2')])
+            return(rep_df)
+        })
+        do.call(rbind, bio_list)
+    })
+    norm_data = do.call(rbind, norm_list)
+    return(norm_data)
+}
+
+
+dir_vec = c('../../trip/cl20180501_TRIP_transient_mix/cDNA',
+            '../../trip/cl20180704_TRIP_mixpool/cDNA',
+            '../../trip/cl20180813_TRIP_transient_mix/cDNA')
+
+norm_list = lapply(1:length(dir_vec), function(i){
+    norm_files = list.files(dir_vec[i], pattern='normalized', full.names=T)
+    if (i==2){
+        norm_files = grep('plasmid', norm_files, value=T)
+    }
+    norm_data = parse_norm_files(norm_files)
+    norm_data$attempt = c('A','B','C', 'D')[i]
+    return(norm_data)
+})
+
+
+esc_repr_list = lapply(norm_list, function(norm){
+    norm = norm[which(norm$class%in%c('escaper', 'repressed')),]
+    ddply(norm, .(bio), function(bio_norm){
+        col_sum = colSums(bio_norm[,grep('count', colnames(bio_norm))])
+        bio_norm[,c('cDNA_cpm_1', 'gDNA_cpm_1')] =
+            t(t(bio_norm[,c('cDNA_count_1', 'gDNA_count_1')]) /
+              col_sum[1:2] * min(col_sum[1:2]))
+        bio_norm$norm_1 = bio_norm$cDNA_cpm_1 / bio_norm$gDNA_cpm_1
+
+
+        bio_norm[,c('cDNA_cpm_2', 'gDNA_cpm_2')] =
+            t(t(bio_norm[,c('cDNA_count_2', 'gDNA_count_2')]) /
+              col_sum[3:4] * min(col_sum[3:4]))
+        bio_norm$norm_2 = bio_norm$cDNA_cpm_2 / bio_norm$gDNA_cpm_2
+
+        bio_norm$norm = rowMeans(bio_norm[, c('norm_1', 'norm_2')])
+        return(bio_norm)
+    })
+})
+
+esc_repr_data = do.call(rbind, esc_repr_list)
+
+esc_repr_cast = dcast(esc_repr_data, prom_name + class + barcode ~ attempt + bio,
+                      value.var='norm')
+col_name_vec = colnames(esc_repr_cast)[4:ncol(esc_repr_cast)]
+## remove A_B and A_C since these samples seem to have been mixed up.
+col_name_vec = col_name_vec[!col_name_vec %in% c('A_B', 'A_C') ]
+
+esc_repr_cast$mean = rowMeans(esc_repr_cast[,col_name_vec])
+
+pdf('cl20180828_mean_plasmid_mix_esc_repr.pdf', useDingbats=F)
+ggplot(esc_repr_cast, aes(x=prom_name, y=mean, color=class)) +
+    geom_quasirandom(size=0.4) +
+    geom_boxplot(alpha=0, color='black') +
+    scale_color_manual(values=COL_class)
+dev.off()
+
+
+pgk_data = norm_list[[3]][which(norm_list[[3]]$prom_name=='hPGK'), ]
+pgk_norm = ddply(pgk_data, .(bio), function(bio_norm){
+    col_sum = colSums(bio_norm[,grep('count', colnames(bio_norm))])
+    bio_norm[,c('cDNA_cpm_1', 'gDNA_cpm_1')] =
+        t(t(bio_norm[,c('cDNA_count_1', 'gDNA_count_1')]) /
+          col_sum[1:2] * min(col_sum[1:2]))
+    bio_norm$norm_1 = bio_norm$cDNA_cpm_1 / bio_norm$gDNA_cpm_1
+
+
+    bio_norm[,c('cDNA_cpm_2', 'gDNA_cpm_2')] =
+        t(t(bio_norm[,c('cDNA_count_2', 'gDNA_count_2')]) /
+          col_sum[3:4] * min(col_sum[3:4]))
+    bio_norm$norm_2 = bio_norm$cDNA_cpm_2 / bio_norm$gDNA_cpm_2
+
+    bio_norm$norm = rowMeans(bio_norm[, c('norm_1', 'norm_2')])
+    return(bio_norm)
+})
+
+
+pgk_cast = dcast(pgk_norm, prom_name + class + barcode ~ attempt + bio,
+                 value.var='norm')
+
+pgk_cast$mean = rowMeans(pgk_cast[,c('C_A', 'C_B')])
+
+
+
+
+offset_data = norm_list[[3]][!is.na(norm_list[[3]]$class), ]
+
+offset_data$is_pgk = offset_data$prom_name=='hPGK'
+
+offset_count = ddply(offset_data, .(is_pgk, bio), function(x){
+    colSums(x[,grep('count', colnames(x))])
+})
+
+offset_norm = ddply(offset_count, .(bio), function(x){
+    col_sum = colSums(x[,grep('count', colnames(x))])
+    cpm_1 = t(t(x[,c('cDNA_count_1', 'gDNA_count_1')]) /
+              col_sum[1:2] * min(col_sum[1:2]))
+    colnames(cpm_1) = c('cDNA_cpm_1', 'gDNA_cpm_1')
+    norm_1 = cpm_1[,1] / cpm_1[,2]
+
+    cpm_2 = t(t(x[,c('cDNA_count_2', 'gDNA_count_2')]) /
+              col_sum[1:2] * min(col_sum[1:2]))
+    colnames(cpm_2) = c('cDNA_cpm_2', 'gDNA_cpm_2')
+    norm_2 = cpm_2[,1] / cpm_2[,2]
+    return(data.frame(x, cpm_1, cpm_2, norm_1, norm_2))
+})
+
+offset_norm$norm = rowMeans(offset_norm[,c('norm_1', 'norm_2')])
+
+offset_cast = dcast(offset_norm, is_pgk ~ bio, value.var='norm')
+offset_cast$mean = rowMeans(offset_cast[,c('A', 'B')])
+
+pgk_cast$mean_offset = pgk_cast$mean * offset_cast[offset_cast$is_pgk, 'mean']
+esc_repr_cast$mean_offset = esc_repr_cast$mean * offset_cast[!offset_cast$is_pgk, 'mean']
+
+
+mean_offset = rbind(pgk_cast[,c('prom_name', 'class', 'barcode', 'mean_offset')],
+                    esc_repr_cast[,c('prom_name', 'class', 'barcode', 'mean_offset')])
+
+
+pdf('cl20180904_plasmid_mix_expression.pdf', useDingbats=F, width=5, height=5)
+
+ggplot(mean_offset, aes(x=log2(mean_offset), y=promoter, color=class)) +
+    geom_quasirandom(alpha=0.5, size=0.5, groupOnX=FALSE) +
+    theme_bw() +
+    scale_color_manual(values=COL_class) +
+    stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
+                 geom = "crossbar", color='black', width = 0.4) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    xlab('log2(expression)') +
+    ylab('promoter') +
+    guides(color=FALSE)
+dev.off()
+
+sd_table_plasmid = aggregate(log2(mean_offset) ~ prom_name, sd, data=mean_offset )
+
+mean(sd_table_plasmid[,2])
+sd(sd_table_plasmid[,2])
+
+
+```
+
+
+
+```{r}
+
+
+rev_file_list = list.files('../../trip/cl20180409_TRIP_K562_evsr/mapping',
+                           pattern='2.table', full.names=T)
+names(rev_file_list) = gsub('.*mapping/(.*).2.table', '\\1', rev_file_list)
+
+map_info = data.frame(name=names(rev_file_list),
+                      promoter=gsub('(.+?)_.*', '\\1', names(rev_file_list)),
+                      bio_rep = gsub('.+?_(.+)_.*', '\\1', names(rev_file_list)),
+                      tech_rep = gsub('.+?_.+?_r([0-9])', '\\1', names(rev_file_list)),
+                      stringsAsFactors=F)
+
+
+rev_table_list = lapply(rev_file_list, read.table, header=T, stringsAsFactors=F,
+                        row.names=1)
+
+call_file_list = list.files('../../trip/cl20180409_TRIP_K562_evsr/calls',
+                            full.names=T)
+names(call_file_list) = gsub('.*calls/(.*).txt', '\\1', call_file_list)
+
+call_info = data.frame(name=names(call_file_list),
+                       promoter=gsub('(.+?)_.*', '\\1', names(call_file_list)),
+                       bio_rep = gsub('.+?_(.+)_.*', '\\1', names(call_file_list)),
+                       call = gsub('.+?_.+?_(.+)', '\\1', names(call_file_list)),
+                       stringsAsFactors=F)
+
+
+dam_file_list = list.files('../../trip/cl20180409_TRIP_K562_evsr/dam',
+                             pattern='.txt', full.names=T)
+names(dam_file_list) = gsub('.*dam/(.*).txt', '\\1', dam_file_list)
+
+dam_info = data.frame(name=names(dam_file_list),
+                      promoter=gsub('(.+?)_.*', '\\1', names(dam_file_list)),
+                      bio_rep = gsub('.+?_(.+?)_.*', '\\1', names(dam_file_list)),
+                      target = gsub('.+?_.+?_(.+?)_.*', '\\1', names(dam_file_list)),
+                      window = gsub('.+?_.+?_.+?_(.*)', '\\1', names(dam_file_list)),
+                      stringsAsFactors=F)
+
+dam_table_list = lapply(dam_file_list, read.table, header=T, row.names=1,
+                       stringsAsFactors=F)
+names(dam_table_list) = dam_info$name
+
+
+call_table_list = lapply(call_file_list, read.table, header=T, row.names=1)
+
+
+
+chip_domain_file_list = list.files('../../trip/cl20180409_TRIP_K562_evsr/chip/domains_call',
+                            pattern='.txt', full.names=T)
+names(chip_domain_file_list) = gsub('.*call/(.*).txt', '\\1', chip_domain_file_list)
+
+chip_domain_info = data.frame(name=names(chip_domain_file_list),
+                              promoter=gsub('(.+?)_.*', '\\1', names(chip_domain_file_list)),
+                              bio_rep = gsub('.+?_(.+?)_.*', '\\1', names(chip_domain_file_list)),
+                              experiment = gsub('.+?_.+?_(.+?)_.*', '\\1',
+                                             names(chip_domain_file_list)),
+                               target = gsub('.+?_.+?_.+?_(.+?)_.*', '\\1',
+                                                 names(chip_domain_file_list)),
+                               sample = gsub('.+?_.+?_.+?_.+?_(.+?)', '\\1',
+                                             names(chip_domain_file_list)),
+                               stringsAsFactors=F)
+
+chip_domain_table_list = lapply(chip_domain_file_list, read.table, header=F,
+                               stringsAsFactors=F, row.names=4,
+                               col.names=c('seqnames', 'start', 'end', 'barcode',
+                                           'score', 'strand', 'call'))
+
+
+
+class_vec = c('6'='repressed', '8'='escaper', '9'='escaper', '11'='repressed',
+              '12'='escaper', '10'='repressed', 'hPGK'='iLAD')
+COL_vec = c(repressed="#A020F0", escaper="#FFA500", iLAD="#0077FF")
+
+mapping_list = lapply(names(class_vec), function(prom){
+    bio_list = lapply(unique(map_info$bio_rep), function(bio){
+        name_vec = map_info[map_info$promoter==prom & map_info$bio==bio, 'name']
+        rep_vec = map_info[map_info$promoter==prom & map_info$bio==bio, 'tech_rep']
+        name = name_vec[rep_vec=="1"]
+        rev_data = rev_table_list[name_vec]
+        rep1 = rev_data[[which(rep_vec=="1")]]
+        rep2 = rev_data[[which(rep_vec=="2")]]
+        rep1$ratio1 = rep1$reads1 / rep1$total_mapped
+        rep1$ratio2 = rep1$reads2 / rep1$total_mapped
+        rep1$avg_mapq = rep1$mapq_sum1 / rep1$reads1
+
+        rep2$ratio1 = rep2$reads1 / rep2$total_mapped
+        rep2$ratio2 = rep2$reads2 / rep2$total_mapped
+        rep2$avg_mapq = rep2$mapq_sum1 / rep2$reads1
+
+        rep1$unique = rep1$ratio1 > 0.7 & rep1$ratio2 < 0.1 & rep1$avg_mapq > 10 &
+                   rep1$reads1 > 5
+        rep2$unique = rep2$ratio1 > 0.7 & rep2$ratio2 < 0.1 & rep2$avg_mapq > 10 &
+                   rep2$reads2 > 5
+
+        ## which barcodes were in found in both replicates
+        shared_bc = rownames(rep1)[rep1$unique][rownames(rep1)[rep1$unique] %in%
+                                                rownames(rep2)[rep2$unique]]
+        ## do they map to the same location?
+        equal = rep1[shared_bc, c('seqname', 'ori', 'start_pos')] ==
+                 rep2[shared_bc, c('seqname', 'ori', 'start_pos')]
+        not_equal = shared_bc[which(rowSums(equal) != 3)]
+        unique_rep1 = rownames(rep1)[rep1$unique][!(rownames(rep1)[rep1$unique] %in%
+                                                  rownames(rep2)[rep2$unique])]
+        unique_rep2 = rownames(rep2)[rep2$unique][!(rownames(rep2)[rep2$unique] %in%
+                                                  rownames(rep1)[rep1$unique])]
+        shared_bc = rownames(rep1)[rownames(rep1) %in%
+                              rownames(rep2)]
+        shared_bc = shared_bc[!shared_bc %in% not_equal]
+        equal = rep1[shared_bc, c('seqname', 'ori', 'start_pos')] ==
+               rep2[shared_bc, c('seqname', 'ori', 'start_pos')]
+        equal_bc = shared_bc[which(rowSums(equal) == 3)]
+        map_data = rep1[equal_bc, ]
+        map_data[, c('total_mapped', 'mapq_sum1',
+            'reads1', 'mapq_sum2', 'reads2')] =
+            rep1[equal_bc, c('total_mapped', 'mapq_sum1',
+                             'reads1', 'mapq_sum2', 'reads2')] +
+            rep2[equal_bc, c('total_mapped', 'mapq_sum1',
+                             'reads1', 'mapq_sum2', 'reads2')]
+        not_equal_bc = shared_bc[which(rowSums(equal) != 3)]
+        map_data = rbind(map_data,
+                         rep1[not_equal_bc[rep1[not_equal_bc, 'unique']], ],
+                         rep2[not_equal_bc[rep2[not_equal_bc, 'unique']], ])
+        map_data = rbind(map_data,
+                          rep1[!rownames(rep1) %in% rownames(rep2), ],
+                          rep2[!rownames(rep2) %in% rownames(rep1), ])
+        this_call = call_info[call_info$promoter==prom & call_info$bio_rep==bio,]
+        cl_df = do.call(cbind, call_table_list[this_call$name])
+        colnames(cl_df) = gsub(paste0(prom, '_', bio, '_'), '', colnames(cl_df))
+
+
+        this_dam = dam_info[dam_info$promoter==prom &
+                                  dam_info$bio_rep==bio,]
+        dl = lapply(dam_table_list[this_dam$name],
+                    function(x){return(x[,'mean', drop=F])})
+        dl_df = do.call(cbind, dl)
+        colnames(dl_df) = paste0(this_dam$target, '_DamID')
+
+        this_chip_domain = chip_domain_info[chip_domain_info$promoter==prom &
+                                            chip_domain_info$bio_rep==bio,]
+        cd = lapply(chip_domain_table_list[this_chip_domain$name],
+                    function(x){return(x[,'call', drop=F])})
+        cd_df = do.call(cbind, cd)
+        colnames(cd_df) = paste(this_chip_domain$experiment, this_chip_domain$target,
+                                this_chip_domain$sample, 'call', sep='_')
+
+        df = data.frame(map_data[,c('seqname', 'ori', 'start_pos', 'unique')],
+                        cl_df[rownames(map_data), ],
+                        dl_df[rownames(map_data), ],
+                        cd_df[rownames(map_data), ],
+                        prom=prom,
+                        bio=bio)
+        df$lad = ifelse(is.na(df$LMNB1.domain_index) , 'iLAD', 'LAD')
+        return(df)
+    })
+    names(bio_list) = unique(map_info$bio_rep)
+    return(bio_list)
+})
+names(mapping_list) = names(class_vec)
+
+
+check_reproducability <- function(rep1, rep2){
+    bc_vec1 = rownames(rep1)
+    bc_vec2 = rownames(rep2)
+    bc_vec = bc_vec1[bc_vec1 %in% bc_vec2]
+    uniq_rep1 = bc_vec1[!bc_vec1 %in% bc_vec2]
+    uniq_rep2 = bc_vec2[!bc_vec2 %in% bc_vec1]
+    cat(paste0('shared: ', length(bc_vec), '\n'))
+    cat(paste0('rep1 unique: ', length(uniq_rep1), '\n'))
+    cat(paste0('rep2 unique: ', length(uniq_rep2), '\n'))
+    bc_vec = bc_vec[rep1[bc_vec, 'gDNA_count'] > 100 | rep2[bc_vec, 'gDNA_count'] > 100]
+    cat(paste0('above threshold (> 100 gDNA either rep): ', length(bc_vec), '\n'))
+    cat(paste0('rep1 unique > 100: ', length(which(rep1[uniq_rep1, 'gDNA_count'] > 100)),
+               '\n'))
+    cat(paste0('rep2 unique > 100: ', length(which(rep2[uniq_rep2, 'gDNA_count'] > 100)),
+               '\n'))
+    colnames(rep1) = paste0(colnames(rep1), '_1')
+    colnames(rep2) = paste0(colnames(rep2), '_2')
+    norm_data = data.frame(rep1[bc_vec, ], rep2[bc_vec, ],
+                           barcode=bc_vec, stringsAsFactors=F)
+    norm_data$norm = rowMeans(norm_data[,c('normalized_by_gDNA_1',
+                                           'normalized_by_gDNA_2')])
+    return(norm_data)
+}
+
+
+
+exp_file_list = list.files('../../trip/cl20180409_TRIP_K562_evsr/cDNA', pattern='normalized',
+                       full.names=T)
+names(exp_file_list) = gsub('.*cDNA/(.*).normalized', '\\1', exp_file_list)
+
+exp_table_list = lapply(exp_file_list, read.table, header=T, stringsAsFactors=F,
+                        row.names=1)
+
+exp_info = data.frame(name=names(exp_file_list),
+                      promoter=gsub('([0-9]+).*', '\\1', names(exp_file_list)),
+                      bio_rep = gsub('[0-9]+([A-B]).*', '\\1', names(exp_file_list)),
+                      tech_rep = gsub('[0-9]+[A-B]_r(.*)', '\\1', names(exp_file_list)),
+                      stringsAsFactors=F)
+exp_info$promoter = gsub('(.*)_.*_.*', '\\1', exp_info$promoter)
+exp_info$bio_rep = gsub('.*_(.*)_.*', '\\1', exp_info$bio_rep)
+exp_info$tech_rep = gsub('.*_.*_r(.*)', '\\1', exp_info$tech_rep)
+
+exp_list = lapply(unique(exp_info$promoter), function(prom){
+    lapply(unique(exp_info$bio_rep), function(bio){
+        name_vec = exp_info[exp_info$promoter==prom & exp_info$bio==bio, 'name']
+        rep1 = exp_table_list[[name_vec[1]]]
+        rep2 = exp_table_list[[name_vec[2]]]
+        norm_data = check_reproducability(rep1, rep2)
+        map_data = mapping_list[[prom]][[bio]]
+        data.frame(norm_data, prom=prom, bio=bio,
+                   map_data[norm_data$barcode, ],
+                   stringsAsFactors=F)
+    })
+})
+exp_df = do.call(rbind, lapply(exp_list, function(l){do.call(rbind,l)}))
+prom_name = c('6'='ADAMTS1', '8'='TMEM106B', '9'='MED30', '11'='ARHGEF9',
+              '12'='ZNF300', '10'='BRINP1', 'hPGK'='hPGK')
+exp_df$prom_name = prom_name[exp_df$prom]
+exp_df$class = class_vec[exp_df$prom]
+
+bc_table = table(exp_df$barcode)
+bc_vec = names(bc_table)[bc_table==1]
+
+exp_df = exp_df[which(exp_df$barcode%in%bc_vec), ]
+
+
+trip_data = exp_df[which(exp_df$lad %in% c('iLAD', 'LAD') & exp_df$unique &
+                         exp_df$seqname!='chrY'), ]
+
+sd_table_pool = aggregate(log2(norm) ~ prom_name, sd, data=trip_data)
+mean(sd_table_pool[,2])
+sd(sd_table_pool[,2])
+
+t.test(sd_table_plasmid[,2], sd_table_pool[,2])
+
+```

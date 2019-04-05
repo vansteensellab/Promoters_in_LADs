@@ -1,3 +1,4 @@
+basedir = "/DATA/usr/c.leemans/projects/Promoters_in_LADs/"
 
 library(ggpubr)
 library(ggplot2)
@@ -30,6 +31,7 @@ matchSet <- function(table, class_col, class, order_on){
 }
 
 
+
 COLi<-"#00BBFF11" #dot color for iLAD promoters
 COL_lad = COL_nad = c("#FF0000", "#0077FF")
 names(COL_lad)<-c('LAD', 'iLAD')
@@ -44,28 +46,30 @@ COL<-c("#A020F0", "#FFA500", "#006400")
 names(COL)<-c("repressed", "escaper", "inactive")
 
 
-P_exp = read.table(paste0(basedir, '/data/lad_promoters/expression/',
+P_pro_body = read.table(paste0(basedir, '/data/promoter_expression/tssr_body_exp/',
+                               'gencode.v27_gene_body.txt.gz'),
+                        stringsAsFactors=F, header=T)
+
+P_exp = read.table(paste0(basedir, '/data/promoter_expression/expression/',
                           'gencode.v27_stranded_expression.txt.gz'),
                        stringsAsFactors=F, header=T, row.names=1)
 
 for (col in colnames(P_exp)){
     P_exp[which(is.na(P_exp[,col])),col] = 0
 }
-for (col in colnames(P_proseq)){
-    P_proseq[which(is.na(P_proseq[,col])),col] = 0
-}
 
-P_tss = read.table(paste0(basedir, '/data/lad_promoters/selection/',
+
+P_tss = read.table(paste0(basedir, '/data/promoter_expression/selection/',
                           'gencode.v27_fantom_selection.txt'),
                    stringsAsFactors=F, row.names=3,
                    col.names=c('seqnames', 'tss', 'transcript_id', 'strand',
                                'gene_id', 'max_fantom', 'tissues_expressed'))
 
-P_domain = read.table(paste0(basedir, '/data/lad_promoters/domains/',
+P_domain = read.table(paste0(basedir, '/data/promoter_expression/domains/',
                              'gencode.v27_domains.txt'),
                       stringsAsFactors=F, header=T, row.names=1)
 
-P = data.frame(P_tss, P_exp[rownames(P_tss), ], P_domain[rownames(P_tss), ])
+P = data.frame(P_tss, P_exp[rownames(P_tss), ], P_domain[rownames(P_tss), ,drop=F])
 P$K562_CAGE_FANTOM = ifelse(P$strand=='+',
                             rowMeans(P[,c("CAGE.FANTOM.rep1_plus",
                                           "CAGE.FANTOM.rep2_plus",
@@ -79,12 +83,6 @@ P$K562_PROseq = ifelse(P$strand=='+',
                        rowMeans(P[,c("PROseq.rep1_min",
                                      "PROseq.rep2_min")]))
 
-proseq_match = match(rownames(P), P_proseq$transcript_id)
-P$K562_PROseq_200 = ifelse(P$strand=='+',
-                           rowMeans(P_proseq[proseq_match,c("rep1_plus",
-                                                            "rep2_plus")]),
-                          rowMeans(P_proseq[proseq_match,c("rep1_min",
-                                                           "rep2_min")]))
 
 
 
@@ -112,7 +110,7 @@ P$K562_CAGE_jitter = log10(P$K562_CAGE_FANTOM + jit + sd_jit / 2)
 sd_jit = min(P$K562_PROseq[P$K562_PROseq>0])
 jit = rnorm(nrow(P), sd = sd_jit / 20)
 P$K562_PROseq_jitter = log10(P$K562_PROseq + jit + sd_jit / 2)
-P$K562_PROseq_200_jitter = log10(P$K562_PROseq_200 + jit + sd_jit / 2)
+
 
 
 pseudo_log10 <- function(val_vec){
@@ -122,7 +120,7 @@ pseudo_log10 <- function(val_vec){
 }
 
 for (col in c('K562_PROseq', 'K562_CAGE_FANTOM', 'K562_SuRE',
-              'K562_PROseq_200', 'K562_GROcap')){
+              'K562_GROcap')){
     P[,col] = pseudo_log10(P[,col])
 }
 

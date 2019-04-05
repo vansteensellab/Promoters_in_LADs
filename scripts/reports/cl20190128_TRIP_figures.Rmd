@@ -1,4 +1,7 @@
 ```{r}
+
+basedir = '/DATA/usr/c.leemans/projects/Promoters_in_LADs/'
+
 library(ggbeeswarm)
 library(ggplot2)
 library(reshape2)
@@ -17,9 +20,8 @@ names(COL_lad)<-c('LAD', 'iLAD')
 COL_class<-c("#A020F0", "#FFA500", "#006400", "#7e7e7e", "#0077FF")
 names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
 
-trip_dir = '../../trip/cl20180828_TRIP_K562_evsr/'
 
-rev_file_list = list.files(paste0(trip_dir, 'mapping'),
+rev_file_list = list.files(paste0(basedir, 'data/trip/mapping'),
                            pattern='[AB].2.table', full.names=T)
 names(rev_file_list) = gsub('.*mapping/(.*).2.table', '\\1', rev_file_list)
 
@@ -32,7 +34,7 @@ map_info = data.frame(name=names(rev_file_list),
 rev_table_list = lapply(rev_file_list, read.table, header=T, stringsAsFactors=F,
                         row.names=1)
 
-call_file_list = list.files(paste0(trip_dir, 'calls'),
+call_file_list = list.files(paste0(basedir, 'data/trip/calls'),
                             full.names=T)
 names(call_file_list) = gsub('.*calls/(.*).txt', '\\1', call_file_list)
 
@@ -44,7 +46,7 @@ call_info = data.frame(name=names(call_file_list),
 
 call_table_list = lapply(call_file_list, read.table, header=T, row.names=1)
 
-dam_file_list = list.files(paste0(trip_dir, 'dam'),
+dam_file_list = list.files(paste0(basedir, 'data/trip/dam'),
                              pattern='.txt', full.names=T)
 names(dam_file_list) = gsub('.*dam/(.*).txt', '\\1', dam_file_list)
 
@@ -59,7 +61,7 @@ dam_table_list = lapply(dam_file_list, read.table, header=T, row.names=1,
                        stringsAsFactors=F)
 names(dam_table_list) = dam_info$name
 
-chip_means_file_list = list.files(paste0(trip_dir, 'chip/means'),
+chip_means_file_list = list.files(paste0(basedir, 'data/trip/chip/means'),
                               pattern='.txt', full.names=T)
 names(chip_means_file_list) = gsub('.*means/(.*).txt', '\\1', chip_means_file_list)
 
@@ -80,8 +82,8 @@ chip_means_table_list = lapply(chip_means_file_list, read.table, header=T,
                                stringsAsFactors=F, row.names=1)
 
 
-chip_nearest_file_list = list.files(paste0(trip_dir,
-                                           'chip/nearest_domains-1000-0.9'),
+chip_nearest_file_list = list.files(paste0(basedir,
+                                           'data/trip/chip/nearest_domains-1000-0.9'),
                                     pattern='.txt', full.names=T)
 
 names(chip_nearest_file_list) = gsub('.*0.9/(.*).txt', '\\1', chip_nearest_file_list)
@@ -105,7 +107,7 @@ chip_nearest_table_list = lapply(chip_nearest_file_list, read.table, header=F,
 
 
 
-chip_domain_file_list = list.files(paste0(trip_dir, 'chip/domains_call'),
+chip_domain_file_list = list.files(paste0(basedir, 'data/trip/chip/domains_call'),
                                    pattern='.txt', full.names=T)
 names(chip_domain_file_list) = gsub('.*call/(.*).txt', '\\1', chip_domain_file_list)
 
@@ -235,8 +237,8 @@ check_reproducability <- function(rep1, rep2){
 
 
 
-exp_file_list = list.files('../../trip/cl20180409_TRIP_K562_evsr/cDNA', pattern='normalized',
-                       full.names=T)
+exp_file_list = list.files(paste0(basedir, 'data/trip/cDNA'),
+                           pattern='normalized', full.names=T)
 names(exp_file_list) = gsub('.*cDNA/(.*).normalized', '\\1', exp_file_list)
 
 exp_table_list = lapply(exp_file_list, read.table, header=T, stringsAsFactors=F,
