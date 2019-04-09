@@ -21,9 +21,9 @@ COL_class<-c("#A020F0", "#FFA500", "#006400", "#7e7e7e", "#0077FF")
 names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
 
 
-rev_file_list = list.files(paste0(basedir, 'data/trip/mapping'),
+rev_file_list = list.files(paste0(basedir, 'data/trip/iPCR'),
                            pattern='[AB].2.table', full.names=T)
-names(rev_file_list) = gsub('.*mapping/(.*).2.table', '\\1', rev_file_list)
+names(rev_file_list) = gsub('.*iPCR/(.*).2.table', '\\1', rev_file_list)
 
 map_info = data.frame(name=names(rev_file_list),
                       promoter=gsub('(.+?)_.*', '\\1', names(rev_file_list)),
@@ -105,32 +105,33 @@ chip_nearest_table_list = lapply(chip_nearest_file_list, read.table, header=F,
                                           'score', 'strand', 'distance'))
 
 
+#
+#
+# chip_domain_file_list = list.files(paste0(basedir, 'data/trip/chip/domains_call'),
+#                                    pattern='.txt', full.names=T)
+# names(chip_domain_file_list) = gsub('.*call/(.*).txt', '\\1', chip_domain_file_list)
+#
+# chip_domain_info = data.frame(name=names(chip_domain_file_list),
+#                               promoter=gsub('(.+?)_.*', '\\1', names(chip_domain_file_list)),
+#                               bio_rep = gsub('.+?_(.+?)_.*', '\\1', names(chip_domain_file_list)),
+#                               experiment = gsub('.+?_.+?_(.+?)_.*', '\\1',
+#                                              names(chip_domain_file_list)),
+#                                target = gsub('.+?_.+?_.+?_(.+?)_.*', '\\1',
+#                                                  names(chip_domain_file_list)),
+#                                sample = gsub('.+?_.+?_.+?_.+?_(.+?)', '\\1',
+#                                              names(chip_domain_file_list)),
+#                                stringsAsFactors=F)
+#
+# chip_domain_table_list = lapply(chip_domain_file_list, read.table, header=F,
+#                                stringsAsFactors=F, row.names=4,
+#                                col.names=c('seqnames', 'start', 'end', 'barcode',
+#                                            'score', 'strand', 'call'))
 
 
-chip_domain_file_list = list.files(paste0(basedir, 'data/trip/chip/domains_call'),
-                                   pattern='.txt', full.names=T)
-names(chip_domain_file_list) = gsub('.*call/(.*).txt', '\\1', chip_domain_file_list)
+class_vec = c('ADAMTS1'='repressed', 'ARHGEF9'='repressed', 'BRINP1'='repressed',
+              'MED30'='escaper', 'PGK'='iLAD',  'TMEM106B'='escaper',
+              'ZNF300'='escaper')
 
-chip_domain_info = data.frame(name=names(chip_domain_file_list),
-                              promoter=gsub('(.+?)_.*', '\\1', names(chip_domain_file_list)),
-                              bio_rep = gsub('.+?_(.+?)_.*', '\\1', names(chip_domain_file_list)),
-                              experiment = gsub('.+?_.+?_(.+?)_.*', '\\1',
-                                             names(chip_domain_file_list)),
-                               target = gsub('.+?_.+?_.+?_(.+?)_.*', '\\1',
-                                                 names(chip_domain_file_list)),
-                               sample = gsub('.+?_.+?_.+?_.+?_(.+?)', '\\1',
-                                             names(chip_domain_file_list)),
-                               stringsAsFactors=F)
-
-chip_domain_table_list = lapply(chip_domain_file_list, read.table, header=F,
-                               stringsAsFactors=F, row.names=4,
-                               col.names=c('seqnames', 'start', 'end', 'barcode',
-                                           'score', 'strand', 'call'))
-
-
-
-class_vec = c('6'='repressed', '8'='escaper', '9'='escaper', '11'='repressed',
-              '12'='escaper', '10'='repressed', 'hPGK'='iLAD')
 COL_vec = c(repressed="#A020F0", escaper="#FFA500", iLAD="#0077FF")
 
 mapping_list = lapply(names(class_vec), function(prom){
@@ -158,13 +159,13 @@ mapping_list = lapply(names(class_vec), function(prom){
         dl_df = do.call(cbind, dl)
         colnames(dl_df) = paste0(this_dam$target, '_DamID')
 
-        this_chip_domain = chip_domain_info[chip_domain_info$promoter==prom &
-                                            chip_domain_info$bio_rep==bio,]
-        cd = lapply(chip_domain_table_list[this_chip_domain$name],
-                    function(x){return(x[,'call', drop=F])})
-        cd_df = do.call(cbind, cd)
-        colnames(cd_df) = paste(this_chip_domain$experiment, this_chip_domain$target,
-                                this_chip_domain$sample, 'call', sep='_')
+        # this_chip_domain = chip_domain_info[chip_domain_info$promoter==prom &
+        #                                     chip_domain_info$bio_rep==bio,]
+        # cd = lapply(chip_domain_table_list[this_chip_domain$name],
+        #             function(x){return(x[,'call', drop=F])})
+        # cd_df = do.call(cbind, cd)
+        # colnames(cd_df) = paste(this_chip_domain$experiment, this_chip_domain$target,
+        #                         this_chip_domain$sample, 'call', sep='_')
 
 
         this_chip_means = chip_means_info[chip_means_info$promoter==prom &
@@ -190,7 +191,7 @@ mapping_list = lapply(names(class_vec), function(prom){
         df = data.frame(rev_data,
                         cl_df[rownames(rev_data), ],
                         dl_df[rownames(rev_data), ],
-                        cd_df[rownames(rev_data), ],
+                        # cd_df[rownames(rev_data), ],
                         cm_df[rownames(rev_data), ],
                         cdist_df[rownames(rev_data), ],
                         prom=prom,
@@ -245,13 +246,10 @@ exp_table_list = lapply(exp_file_list, read.table, header=T, stringsAsFactors=F,
                         row.names=1)
 
 exp_info = data.frame(name=names(exp_file_list),
-                      promoter=gsub('([0-9]+).*', '\\1', names(exp_file_list)),
-                      bio_rep = gsub('[0-9]+([A-B]).*', '\\1', names(exp_file_list)),
-                      tech_rep = gsub('[0-9]+[A-B]_r(.*)', '\\1', names(exp_file_list)),
+                      promoter=gsub('(.+?)_.*', '\\1', names(exp_file_list)),
+                      bio_rep = gsub('.+_([A-B]).*', '\\1', names(exp_file_list)),
+                      tech_rep = gsub('.*_r(.*)', '\\1', names(exp_file_list)),
                       stringsAsFactors=F)
-exp_info$promoter = gsub('(.*)_.*_.*', '\\1', exp_info$promoter)
-exp_info$bio_rep = gsub('.*_(.*)_.*', '\\1', exp_info$bio_rep)
-exp_info$tech_rep = gsub('.*_.*_r(.*)', '\\1', exp_info$tech_rep)
 
 exp_list = lapply(unique(exp_info$promoter), function(prom){
     lapply(unique(exp_info$bio_rep), function(bio){
@@ -260,18 +258,16 @@ exp_list = lapply(unique(exp_info$promoter), function(prom){
         rep2 = exp_table_list[[name_vec[2]]]
         norm_data = check_reproducability(rep1, rep2)
         map_data = mapping_list[[prom]][[bio]]
-        data.frame(norm_data, prom=prom, bio=bio,
+        data.frame(norm_data, promoter=prom, bio=bio,
                    map_data[norm_data$barcode, ],
                    stringsAsFactors=F)
     })
 })
 exp_df = do.call(rbind, lapply(exp_list, function(l){do.call(rbind,l)}))
-prom_name = c('6'='ADAMTS1', '8'='TMEM106B', '9'='MED30', '11'='ARHGEF9',
-              '12'='ZNF300', '10'='BRINP1', 'hPGK'='hPGK')
-exp_df$prom_name = factor(prom_name[exp_df$prom],
-                            levels=c('ADAMTS1', 'ARHGEF9', 'BRINP1', 'MED30',
-                                     'TMEM106B', 'ZNF300', 'hPGK'))
-exp_df$class = class_vec[exp_df$prom]
+
+
+
+exp_df$class = class_vec[exp_df$promoter]
 
 
 bc_table = table(exp_df$barcode)
@@ -285,7 +281,7 @@ trip_data = exp_df[which(exp_df$lad %in% c('iLAD', 'LAD') & exp_df$unique &
                          exp_df$seqname!='chrY'), ]
 
 gff_data = trip_data[,c('seqname', 'start_pos', 'ori')]
-gff_data$ID = paste0('ID=', trip_data$barcode, ';promoter=', trip_data$prom_name,
+gff_data$ID = paste0('ID=', trip_data$barcode, ';promoter=', trip_data$promoter,
                      ';log10=', log10(trip_data$norm))
 gff_data$start = trip_data$start_pos - 1
 gff_data$score = log10(trip_data$norm)
@@ -297,39 +293,9 @@ write.table(gff_data[,c('seqname', 'source', 'feature', 'start', 'start_pos',
                         'score', 'ori', 'frame', 'ID')], col.names=F, row.names=F,
             sep='\t', quote=F, file='hg38_TRIP_intergrations.gff')
 
-state_vec = list.files('../../trip/spin_states_trip/', full.names=T)
-state_list = lapply(state_vec, function(x){
-    input_df=read.table(x, stringsAsFactors=F)
-    df = input_df[which(input_df[,1]%in%trip_data$barcode), ]
 
-})
-
-state_dt = do.call(rbind, state_list)
-states = unique(state_dt[,c(2,3)])
-state_color = unlist(lapply(states[,2], function(x){
-    rgb_vec = as.numeric(strsplit(x, ',')[[1]])
-    rgb(rgb_vec[1]/255, rgb_vec[2]/255, rgb_vec[3]/255)
-}))
-names(state_color) = states[,1]
-match_vec = match(trip_data$barcode, state_dt[,1])
-trip_data$state = state_dt[match_vec, 2]
-pdf('cl20181114_spin_states.pdf', useDingbats=F, height=15)
-ggplot(trip_data, aes(x=state, y=log2(norm), color=state)) +
-    geom_quasirandom(size=0.8, alpha=0.8) +
-    stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
-                 color='black', geom = "crossbar", width = 0.4) +
-    scale_color_manual(values=state_color) +
-    theme_bw() +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-    xlab('SPIN-state at site of integration') +
-    ylab('normalized cDNA/gDNA (log2)') +
-    guides(color=FALSE) +
-    facet_wrap(~prom_name, nrow=7)
-dev.off()
-
-
-ddply(trip_data, .(prom_name), function(x){
-    filename=paste0('TRIP_pools_', x$prom_name[1], '.tsv')
+ddply(trip_data, .(promoter), function(x){
+    filename=paste0('TRIP_pools_', x$promoter[1], '.tsv')
     data = x[,c('seqname', 'ori', 'start_pos', 'barcode', 'bio', 'norm',
                      'LMNB1_DamID', 'lad')]
     colnames(data)[5:6] = c('pool', 'expression')
@@ -347,6 +313,7 @@ chip_selection = c("H2AFZ", "H3K122ac", "H3K27ac",  "H3K27me3", "H3K36me3",
 
 chip_X = do.call(cbind, lapply(chip_selection, function(name){
         mean_vec = grep(paste0(name, '_.*_mean'), colnames(trip_data))
+        print(mean_vec)
         if (length(mean_vec) > 1){
             mean = rowMeans(trip_data[, mean_vec])
         } else {
@@ -365,58 +332,17 @@ chip_X = do.call(cbind, lapply(chip_selection, function(name){
     }))
 LMNB1_proximity=log10(1/(abs(trip_data$LMNB1.border_distance) + 1))
 X1 = data.frame(chip_X, LMNB1_proximity,
-               trip_data[, c('LMNB1_DamID', 'prom_name', 'class')])
+               trip_data[, c('LMNB1_DamID', 'promoter', 'class')])
 
 y1 = log2(trip_data[,'norm'])
 
-X = X1[X1$prom_name != 'hPGK', ]
-y = y1[X1$prom_name != 'hPGK']
-X$prom_name = factor(X$prom_name)
+X = X1[X1$promoter != 'hPGK', ]
+y = y1[X1$promoter != 'hPGK']
+X$promoter = factor(X$promoter)
 
-lad_vec = trip_data$lad[X1$prom_name!='hPGK']
+lad_vec = trip_data$lad[X1$promoter!='hPGK']
 
 save(X, y, lad_vec, file='cl20181013_feature_set_trip.Rdata')
-
-chip_all = gsub('-', '.', unique(chip_means_info$target))
-chip_X_list = lapply(chip_all, function(name){
-        mean_vec = grep(paste0(name, '_.*_mean'), colnames(trip_data))
-        dist_vec = grep(paste0(name, '_.*_distance'), colnames(trip_data))
-        if (length(dist_vec > 0)){
-            if (length(mean_vec) > 1){
-                mean = rowMeans(trip_data[, mean_vec])
-            } else {
-                mean = trip_data[,mean_vec]
-            }
-            if (length(mean_vec) > 1){
-                prox = log10(1/(apply(trip_data[, dist_vec], 1, min) + 1))
-            } else {
-                prox = log10(1/(trip_data[,dist_vec] + 1))
-            }
-            df = data.frame(row.names=rownames(trip_data),
-                            mean, prox)
-            colnames(df) = paste0(name, c('_mean', '_proximity'))
-
-        } else{
-            df = NULL
-        }
-        return(df)
-    })
-null_vec = unlist(lapply(chip_X_list, is.null))
-chip_X = do.call(cbind, chip_X_list[!null_vec])
-
-LMNB1_proximity=log10(1/(abs(trip_data$LMNB1.border_distance) + 1))
-X1 = data.frame(chip_X, LMNB1_proximity,
-               trip_data[, c('LMNB1_DamID', 'prom_name', 'class')])
-
-y1 = log2(trip_data[,'norm'])
-
-X = X1[X1$prom_name != 'hPGK', ]
-y = y1[X1$prom_name != 'hPGK']
-X$prom_name = factor(X$prom_name)
-
-save(X, y, file='cl20181013_feature_set_trip_extra.Rdata')
-
-
 
 lad_vec = table(trip_data$lad)
 lad_vec/sum(lad_vec)
@@ -431,13 +357,13 @@ write.table(coef, sep=',', file='cl20180828_simple_interaction_lm.txt')
 lines = data.frame(x=c(1,1,2,2),
                    y=c(7, 8, 8, 7))
 
-norm_summary = aggregate(norm ~ prom_name + class + lad, median, data=trip_data)
+norm_summary = aggregate(norm ~ promoter + class + lad, median, data=trip_data)
 
 
-n_df = aggregate(norm ~ prom_name + lad, length, data=trip_data)
+n_df = aggregate(norm ~ promoter + lad, length, data=trip_data)
 n_df$label = paste0('n=', n_df$norm)
 
-fc_lad = ddply(norm_summary, .(prom_name, class), function(x){
+fc_lad = ddply(norm_summary, .(promoter, class), function(x){
                fc = x[x$lad=='iLAD','norm']/x[x$lad=='LAD','norm']
                n = nchar(as.character(round(fc)))
                c(fc=fc, r=round(fc, digits= 2 - n))
@@ -469,9 +395,9 @@ p1 = ggplot(trip_data, aes(x=lad, y=log2(norm), color=lad)) +
         ylab('normalized cDNA/gDNA (log2)') +
         scale_x_discrete(breaks = NULL) +
         guides(color=FALSE) +
-        facet_wrap(~prom_name)
+        facet_wrap(~promoter)
 
-dummy <- ggplot(data = trip_data, aes(x = lad, y =norm))+ facet_wrap(~prom_name) +
+dummy <- ggplot(data = trip_data, aes(x = lad, y =norm))+ facet_wrap(~promoter) +
   geom_rect(aes(fill=class), xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
   theme_minimal() +
   scale_fill_manual(values=COL_class)
@@ -507,7 +433,7 @@ gtable_stack <- function(g1, g2){
 ## ideally you'd remove the old strips, for now they're just covered
 new_plot <- gtable_stack(g1, new_strips)
 grid.newpage()
-pdf('cl20181013_TRIP_expression_vs_LAD_state.pdf', height=9, width=5, useDingbats=F)
+pdf('Figure_3_TRIP_expression_vs_LAD_state.pdf', height=9, width=5, useDingbats=F)
 grid.draw(new_plot)
 dev.off()
 
@@ -525,10 +451,10 @@ H3K27_data = exp_df[which(exp_df$lad =='iLAD' & exp_df$unique &
 lines = data.frame(H3K27me3_call=c(0,0,1,1),
                    norm=c(7, 8, 8, 7))
 
-norm_summary = aggregate(norm ~ prom_name + class + H3K27me3_call, median,
+norm_summary = aggregate(norm ~ promoter + class + H3K27me3_call, median,
                          data=H3K27_data)
 
-fc_H3K27 = ddply(norm_summary, .(prom_name, class), function(x){
+fc_H3K27 = ddply(norm_summary, .(promoter, class), function(x){
         fc = x[x$H3K27me3_call==0,'norm']/x[x$H3K27me3_call==1,'norm']
         n = nchar(as.character(round(fc)))
         c(fc=fc, r=round(fc, digits= 2 - n))
@@ -539,7 +465,7 @@ fc_H3K27$norm = 9
 
 
 
-n_df = aggregate(norm ~ prom_name + H3K27me3_call, length, data=H3K27_data)
+n_df = aggregate(norm ~ promoter + H3K27me3_call, length, data=H3K27_data)
 n_df$label = paste0('n=', n_df$norm)
 n_df$y = -18
 
@@ -559,10 +485,10 @@ p2 = ggplot(H3K27_data, aes(x=H3K27me3_call, y=log2(norm), color=factor(H3K27me3
         geom_text(data=n_df, aes(y=y, label=label), color='black') +
         stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
                      color='black', geom = "crossbar", width = 0.4) +
-        facet_wrap(~prom_name)
+        facet_wrap(~promoter)
 
 dummy <- ggplot(data=H3K27_data, aes(x = H3K27me3_call, y = norm)) +
-  facet_wrap(~prom_name) +
+  facet_wrap(~promoter) +
   geom_rect(aes(fill=class), xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
   theme_minimal() +
   scale_fill_manual(values=COL_class)
@@ -597,7 +523,7 @@ gtable_stack <- function(g1, g2){
 ## ideally you'd remove the old strips, for now they're just covered
 new_plot <- gtable_stack(g1, new_strips)
 grid.newpage()
-pdf('cl20181013_TRIP_expression_vs_H3K27me3_state.pdf', height=9, width=5, useDingbats=F)
+pdf('Figure_6_TRIP_expression_vs_H3K27me3_state.pdf', height=9, width=5, useDingbats=F)
 grid.draw(new_plot)
 dev.off()
 
@@ -605,10 +531,10 @@ dev.off()
 
 
 ```{r}
-fc_table = data.frame(fc_H3K27[, c('prom_name', 'class')],
+fc_table = data.frame(fc_H3K27[, c('promoter', 'class')],
                       LAD=fc_lad$fc,
                       H3K27me3=fc_H3K27$fc)
-pdf('cl20181013_TRIP_median_LAD_vs_H3K27me3.pdf', width=4, height=4, useDingbats=F)
+pdf('Figure_6H_TRIP_median_LAD_vs_H3K27me3.pdf', width=4, height=4, useDingbats=F)
 ggplot(fc_table, aes(x=log2(LAD), y=log2(H3K27me3), color=class)) +
     stat_smooth(method='lm', se=F, color='black') +
     theme_bw() +
@@ -695,7 +621,7 @@ ggplot(trip_data) +
           panel.grid.minor = element_blank(),
           panel.border = element_blank(),
           axis.text.x = element_text(angle = 90, hjust = 1)) +
-    facet_wrap(~prom_name)
+    facet_wrap(~promoter)
 dev.off()
 
 nodge_left = c('escaper'= - 0.3, 'iLAD' = -0.1, 'repressed' = 0.1)
@@ -723,8 +649,8 @@ ggplot() +
 
 
 txt_color = c('iLAD'='white', 'repressed'='white', 'escaper'='black')
-plot_list = lapply(unique(trip_data$prom_name), function(prom){
-    data = trip_data[trip_data$prom_name==prom, ]
+plot_list = lapply(unique(trip_data$promoter), function(prom){
+    data = trip_data[trip_data$promoter==prom, ]
     class = data$class[1]
     ggplot() +
         geom_segment(data = chrom_sizes,
@@ -745,7 +671,7 @@ plot_list = lapply(unique(trip_data$prom_name), function(prom){
               strip.background = element_rect(fill=COL_class[class]),
               strip.text = element_text(size=15, face='bold', colour=txt_color[class])) +
         scale_color_manual(values=COL_lad) +
-        facet_grid(. ~prom_name)
+        facet_grid(. ~promoter)
 })
 
 for (plot in plot_list){
@@ -754,7 +680,7 @@ for (plot in plot_list){
 
 dev.off()
 
-pdf('cl20180918_trip_ideogram_grid.pdf',  width = 8.27, height = 11.69, useDingbats=F)
+pdf('Figure_S3_trip_ideogram_grid.pdf',  width = 8.27, height = 11.69, useDingbats=F)
 
 do.call(plot_grid, c(plot_list, ncol=2, labels='AUTO'))
 dev.off()

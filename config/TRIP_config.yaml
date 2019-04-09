@@ -289,7 +289,6 @@ annotation:
     chip: True
     chip_domains: True
 
-sure_dir: /DATA/usr/c.leemans/data/tracks/hg38
 dam_dir: /DATA/usr/t.v.schaik/proj/3D_nucleus/results/ts180110_4DN_DataProcessing/results
 
 signal_window: [5000]

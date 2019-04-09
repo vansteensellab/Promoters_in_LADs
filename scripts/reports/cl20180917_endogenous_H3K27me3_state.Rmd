@@ -1,0 +1,264 @@
+
+
+```
+dir="/DATA/usr/c.leemans/projects/Promoters_in_LADs/"
+
+file_list=$(ls $dir"data/chip/hg38/domains/K562/*/H3K27me3*_20000_0.9_analysis.bed")
+
+for file in $file_list
+do
+    name=$(basename ${file%_20000_0_analysis.*})
+    out=data/gencode.v27_$name.txt
+    awk -vOFS='\t' '{
+        if ($3 - $2 > 40001){
+            print $1, $2 + 20000, $3 - 20000, $4
+        }}' $file | \
+    bedtools intersect -c \
+                       -b - \
+                       -a $dir"/data/promoter_expression/selection/gencode.v27_fantom_selection.bed" \
+                       -f 1 | awk -vOFS='\t' '{print $4, $7}' > $out
+done
+
+```
+
+
+```{r}
+
+basedir = "/DATA/usr/c.leemans/projects/Promoters_in_LADs"
+
+library(ggpubr)
+library(ggplot2)
+library(rtracklayer)
+library(plyr)
+library(reshape2)
+library(ggbeeswarm)
+library(knitr)
+library(ppcor)
+
+
+## get a table with matching sets
+## table = complete table to take matching sets from
+## class_col = column name of class of interest
+## class = name of class to match the set on
+## order_on = column name to order on
+matchSet <- function(table, class_col, class, order_on){
+  o_vec = order(table[,order_on])
+  o_table = table[o_vec, ]
+  setA = which(o_table[,class_col]==class)
+  setB = c(setA + 1, setA -1)
+  ## check if setB is all within the possible indexes
+  setB = setB[setB %in% 1:length(o_vec)]
+  ## can also return o_table[unique(c(setA, setB)), ]
+  ## but this way order is perserved.
+  i_vec = o_vec[unique(c(setA, setB))]
+  return(table[i_vec[order(i_vec)], ])
+}
+
+
+COLi<-"#00BBFF11" #dot color for iLAD promoters
+COL_lad = COL_nad = c("#FF0000", "#0077FF")
+names(COL_lad)<-c('LAD', 'iLAD')
+
+names(COL_nad)<-c('NAD', 'iNAD')
+
+#color vector for plotting:
+COL_class<-c("#A020F0", "#FFA500", "#006400", "#7e7e7e", "#0077FF")
+names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
+
+COL<-c("#A020F0", "#FFA500", "#006400")
+names(COL)<-c("repressed", "escaper", "inactive")
+
+
+P_exp = read.table(paste0(basedir, '/data/promoter_expression/expression/',
+                          'gencode.v27_stranded_expression.txt.gz'),
+                       stringsAsFactors=F, header=T, row.names=1)
+
+for (col in colnames(P_exp)){
+    P_exp[which(is.na(P_exp[,col])),col] = 0
+}
+
+P_tss = read.table(paste0(basedir, '/data/promoter_expression/selection/',
+                          'gencode.v27_fantom_selection.txt'),
+                       stringsAsFactors=F, row.names=3,
+                       col.names=c('seqnames', 'tss', 'transcript_id', 'strand',
+                                   'gene_id', 'max_fantom', 'tissues_expressed'))
+
+P_domain = read.table(paste0(basedir, '/data/promoter_expression/domains/',
+                             'gencode.v27_domains.txt'),
+                      stringsAsFactors=F, header=T, row.names=1)
+P = data.frame(P_tss, P_exp[rownames(P_tss), ], P_domain[rownames(P_tss), ])
+P$K562_GROcap = ifelse(P$strand=='+',
+                       P$GROcap_plus,
+                       P$GROcap_min)
+P$K562.B1_sense = ifelse(P$strand=='+',
+                         P$K562.B1_plus,
+                         P$K562.B1_min)
+P$K562.B2_sense = ifelse(P$strand=='+',
+                         P$K562.B2_plus,
+                         P$K562.B2_min)
+P$HT1080.B1_sense = ifelse(P$strand=='+',
+                           P$HT1080.B1_plus,
+                           P$HT1080.B1_min)
+P$HT1080.B2_sense = ifelse(P$strand=='+',
+                           P$HT1080.B2_plus,
+                           P$HT1080.B2_min)
+
+P$K562_SuRE = rowMeans(P[,c('K562.B1_sense', 'K562.B2_sense')])
+P$HT1080_SuRE = rowMeans(P[,c('HT1080.B1_sense', 'HT1080.B2_sense')])
+
+sd_jit = min(P$K562_GROcap[P$K562_GROcap>0])
+jit = rnorm(nrow(P), sd = sd_jit / 20)
+
+P$K562_GROcap_jitter = log10(P$K562_GROcap + jit + sd_jit / 2)
+
+pseudo_log10 <- function(val_vec){
+    Pseud=min(val_vec[val_vec > 0], na.rm=TRUE)/2
+    val_vec = val_vec + Pseud
+    return(log10(val_vec))
+}
+
+for (col in c('K562_SuRE', 'HT1080_SuRE', 'K562_GROcap')){
+    P[,col] = pseudo_log10(P[,col])
+}
+
+create_RM <-function(data, x, y, ad){
+    #then calculate running mean for iLAD promoters:
+    #sort by SuRE and then random for ties
+    o = order(data[,x],sample(c(1:nrow(data))))
+
+    x_sorted = data[o,x]
+    y_sorted = data[o,y]
+    ad_sorted = data[o,ad]
+
+    n<-60 #number of windows
+    w<-501 #window width (number of datapoints); if n*w > nrow(P) then windows overlap
+    s<-round(seq(from=w/2+0.0001, to=nrow(data)-w/2, length.out=n))
+    RM<-data.frame(x.low=rep(NA,n), x.mean=rep(NA,n), x.hi=rep(NA,n), y.AD=rep(NA,n), y.iAD=rep(NA,n))
+    RM$x.low=x_sorted[s-floor(w/2)]
+    for(i in 1:n){RM$x.mean[i]=mean(x_sorted[(s[i]-floor(w/2)):(s[i]+floor(w/2))], na.rm=TRUE)}
+    RM$x.hi=x_sorted[s+floor(w/2)]
+    for(i in 1:n)
+      {t<-data.frame(AD=ad_sorted[(s[i]-floor(w/2)):(s[i]+floor(w/2))],
+                     y=y_sorted[(s[i]-floor(w/2)):(s[i]+floor(w/2))])
+       RM$y.AD[i]<-mean(t$y[t$AD==1], na.rm=TRUE)
+       RM$y.iAD[i]<-mean(t$y[t$AD==0], na.rm=TRUE)
+      }
+    #add first datapoint (SuRE equals pseudocount)
+    RM1<-RM[0,] #empty df
+    RM1[1,]<-c(rep(min(x_sorted),3), mean(y_sorted[x_sorted==min(x_sorted) & ad_sorted==1]), mean(y_sorted[x_sorted==min(x_sorted) & ad_sorted==0]))
+    RM<-rbind(RM1, RM)
+    rm(RM1)
+    return(RM)
+}
+
+
+H3K27_files = list.files('../raw_data/', pattern='gencode.v27_H3K27me3',
+                         full.names=T)
+exp_vec = gsub('.*gencode.v27_H3K27me3_(.*?)_.*', '\\1', H3K27_files)
+
+H3K27_list = lapply(H3K27_files, read.table, row.names=1, header=F)
+#
+# H3K27_rep = lapply(unique(exp_vec), function(exp){
+#     H3K27_table = do.call(cbind, H3K27_list[which(exp_vec==exp)])
+#     state = ifelse(rowSums(H3K27_table)==ncol(H3K27_table), 1, 0)
+#     data.frame(row.names=rownames(H3K27_table), state)
+# })
+
+H3K27_table = do.call(cbind, H3K27_list)
+
+
+P$H3K27_state = ifelse(rowSums(H3K27_table[rownames(P), ])>1, 1, 0)
+
+p_ilad = P[P$K562_LAD==0, ]
+
+RM_H3K27 = create_RM(p_ilad, 'K562_SuRE', 'K562_GROcap', ad='H3K27_state')
+
+p_iH3K27 = P[which(P$H3K27_state==0), ]
+RM_LAD = create_RM(p_iH3K27, 'K562_SuRE', 'K562_GROcap', ad='K562_LAD')
+
+
+
+p_ilad$LRS_H3K27 <- p_ilad$K562_GROcap - approx(x=RM_H3K27$x.mean, y=RM_H3K27$y.iAD,
+                                                xout=p_ilad$K562_SuRE, rule=2)$y
+
+
+
+
+print('correlation iLADs:')
+
+p_cor = cor(p_ilad$K562_SuRE[p_ilad$H3K27_state==0], p_ilad$K562_GROcap[p_ilad$H3K27_state==0], method='pearson')
+print(paste('pearson:', round(p_cor, 2)))
+sp_cor = cor(p_ilad$K562_SuRE[p_ilad$H3K27_state==0], p_ilad$K562_GROcap[p_ilad$H3K27_state==0], method='spearman')
+print(paste('spearman:', round(sp_cor, 2)))
+
+print('correlation H3K27me3 domains:')
+
+p_cor = cor(p_ilad$K562_SuRE[p_ilad$H3K27_state==1],
+            p_ilad$K562_GROcap[p_ilad$H3K27_state==1], method='pearson')
+print(paste('pearson:', round(p_cor, 2)))
+sp_cor = cor(p_ilad$K562_SuRE[p_ilad$H3K27_state==1],
+             p_ilad$K562_GROcap[p_ilad$H3K27_state==1], method='spearman')
+print(paste('spearman:', round(sp_cor, 2)))
+
+
+p_ilad$GROcap_0 = p_ilad$K562_GROcap < -3
+p_ilad$SuRE_0 = p_ilad$K562_SuRE > 0
+m = matchSet(p_ilad[p_ilad$SuRE_0 | p_ilad$H3K27_state==0, ],
+             'H3K27_state', 1, 'K562_SuRE')
+
+no_gro = table(m[,c('GROcap_0', 'H3K27_state')])
+print(no_gro)
+round(t(t(no_gro) / colSums(no_gro) * 100))
+
+
+m = matchSet(p_ilad[p_ilad$K562_SuRE > 1 | p_ilad$H3K27_state==0, ],
+             'H3K27_state', 1, 'K562_SuRE')
+table(m[,c('GROcap_0', 'H3K27_state')])
+
+median(p_ilad[p_ilad$H3K27_state ==1 & p_ilad$SuRE>0, 'LRS_H3K27'])
+
+p_ilad$H3K27n = ifelse(p_ilad$H3K27_state==1, 'H3K27me3', 'iLAD')
+
+COL_vec<-c("#FF0000", "#0077FF", "#00ff00")
+names(COL_vec)<-c('LAD', 'iLAD', 'H3K27me3')
+
+h3_names = c(H3K27me3=paste0('H3K27me3; n=', table(p_ilad$H3K27_state)['1']),
+             iLAD=paste0('iLAD; n=', table(p_ilad$H3K27_state)['0']))
+p_ilad$H3K27_state_n = factor(ifelse(p_ilad$H3K27_state==1, h3_names['H3K27me3'],
+                           h3_names['iLAD']))
+COL_h3_n = COL_vec[c('H3K27me3', 'iLAD')]
+names(COL_h3_n) = h3_names
+
+RM_melt = melt(RM_H3K27, measure.vars=c('y.iAD', 'y.AD'))
+RM_melt$variable = ifelse(RM_melt$variable=='y.AD', h3_names['H3K27me3'],
+                          h3_names['iLAD'])
+ilad_melt = RM_melt[grep('iLAD', RM_melt$variable),]
+
+pdf('cl20181004_H3K27me3_GROcap_vs_SuRE.pdf', height=4, width=5,
+    useDingbats=F)
+ggplot(p_ilad, aes(x=K562_SuRE, y=K562_GROcap_jitter, color=H3K27_state_n)) +
+                  geom_point(data=p_ilad[p_ilad$H3K27_state==0, ], size=0.25, alpha=0.05) +
+                  geom_point(data=p_ilad[p_ilad$H3K27_state==1, ], size=0.5, alpha=0.5) +
+                  theme_bw() +
+                  geom_line(data=RM_H3K27, aes(x=x.mean, y=y.AD), color='black',  size=1) +
+                  geom_line(data=RM_H3K27, aes(x=x.mean, y=y.iAD), color='black',  size=1) +
+                  geom_line(data=RM_LAD, aes(x=x.mean, y=y.AD), color='black',  size=1) +
+                  geom_line(data=RM_LAD, aes(x=x.mean, y=y.AD),
+                            color=COL_vec['LAD'],  size=0.5) +
+                  geom_line(data=RM_melt, aes(x=x.mean, y=value, color=variable),
+                            size=0.5) +
+                  labs(y='log10(GROcap)', x='log10(SuRE)') +
+                  scale_color_manual(values=COL_h3_n) +
+                  theme(panel.grid.minor = element_blank(),
+                        panel.grid.major = element_line(size = .5, color = "grey"),
+                        axis.line = element_line(size=.7, color = "black"),
+						legend.background = element_rect(fill="transparent"),
+                        text = element_text(size=14),
+						legend.justification =c(0,1),
+		 			    legend.position=c(0.05,0.95),
+						legend.title=element_blank()) +
+                  coord_equal(ratio=1) +
+          		  guides(colour = guide_legend(override.aes = list(size=1,
+                         linetype=0, alpha=1)))
+dev.off()
+```

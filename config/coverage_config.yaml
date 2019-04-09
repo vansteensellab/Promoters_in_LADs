@@ -1,6 +1,8 @@
 outdir:
     '/DATA/usr/c.leemans/projects/Promoters_in_LADs/data/promoter_chip'
 
+## bed_summary:
+## gives a mean chip signal of each region in the bed-file.
 bed_summary:
     gencode.v27_tssr:
         '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_tss.bed'
@@ -8,20 +10,28 @@ bed_summary:
         '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_gene_body.bed'
     gencode.v27_1kb:
         '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_1kb.bed'
-    gencode.v27_5kb:
-        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_5kb.bed'
-    genehancer.4.6_5kb:
-        '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/genehancer.v4.6_5kb.bed'
+
+## bed_window:
+## calculates a running sum in a window with a set bin-size around the point of interest in bed file
+## like the start of a region in the bed-file (e.g. TSS)
 bed_window:
     gencode.v27:
         '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/selection/gencode.v27_fantom_selection.bed'
 
+## nearest_domains:
+## calculate the distance to a nearest domain, from a single point of interest
 bed_nearest_domains:
     gencode.v27:
         '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/gencode.v27_tss.bed'
     genehancer.v4.6:
         '/DATA/usr/c.leemans/projects/single_cell_damid/cl20180517_hg38_snakemake/tssr_gene_body/genehancer.v4.6_center.bed'
 
+
+## parameters used for the window running sum calculation. (used for running deeptools)
+# a: # of nucleotides after site of interest to start window sums.
+# b: # of nucleotides before site of interest to start window sums.
+# binsize: size of each bin
+# refpoint: reference point used (e.g. TSS, TES)
 window_params:
     gencode.v27:
         a: 22000
@@ -33,9 +43,13 @@ genome: hg38
 
 celltype: 'K562'
 
+
+## directory with ChIP info
 chip_dir:
     '/DATA/usr/c.leemans/projects/Promoters_in_LADs/data/chip'
 
+
+## information on align snakemake which downloads and aligns ChIP data.
 chip_align_config:
     '/DATA/usr/c.leemans/projects/Promoters_in_LADs/config/align_config.yaml'
 chip_align:

@@ -243,7 +243,7 @@ figS1B = ggplot(m, aes(x=K562_SuRE, color=lad)) +
           legend.justification =c(1,1),
           legend.position=c(0.05,0.95),
           legend.title=element_blank())
-pdf('cl20181017_GROcap_percentage_inactive.pdf', useDingbats=F, width=6, height=3)
+pdf('Figure_S1AB_GROcap_percentage_inactive.pdf', useDingbats=F, width=6, height=3)
 plot_grid(figS1A, figS1B, labels='AUTO',rel_widths=c(1,1.5), align='h', nrow=1)
 dev.off()
 
@@ -458,7 +458,7 @@ p_proclass = ggplot(p_classes, aes(x=K562_SuRE, y=K562_PROseq_jitter,
     scale_color_manual(values=COL_class_LAD_n) +
     coord_equal(ratio=1)
 
-pdf('cl20190104_CAGE_PROseq.pdf', width=8, height=5, useDingbats=F)
+pdf('Figure_S1C-F_CAGE_PROseq.pdf', width=8, height=5, useDingbats=F)
 
 grid.arrange(p_lad_cage, p_lad_proseq, nrow=1)
 
@@ -491,6 +491,6 @@ figD = ggplot(P[P$class_LAD!='boundary', ], aes(x=class_LAD, y=tissues_expressed
           panel.grid.minor = element_blank(),
           axis.title.x=element_blank())
 
-pdf('cl20181017_SuRE_vs_GROcap_prom.pdf', useDingbats=F, width=10, height=7)
+pdf('Figure_1_SuRE_vs_GROcap_prom.pdf', useDingbats=F, width=10, height=7)
 plot_grid(figA, figB, figC, figD, labels='AUTO', nrow=2)
 dev.off()

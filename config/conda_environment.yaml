@@ -1,4 +1,5 @@
 name: Promoters_in_LADs
+prefix: /home/c.leemans/mydata/miniconda3/envs/Promoters_in_LADs
 channels:
   - bioconda
   - r
@@ -29,7 +30,7 @@ dependencies:
   - configargparse=0.13.0=py35_0
   - cryptography=2.3.1=py35hc365091_0
   - curl=7.61.0=h84994c4_0
-  - cutadapt=1.18=py35_0
+  - cutadapt=1.11=py35_0
   - cycler=0.10.0=py35hc4d5149_0
   - datrie=0.7.1=py35h7b6447c_1
   - dbus=1.13.6=h746ee38_0
@@ -170,5 +171,3 @@ dependencies:
   - yarl=1.2.6=py35h14c3975_0
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.3.7=h0b5b093_0
-prefix: /home/c.leemans/mydata/miniconda3/envs/Promoters_in_LADs
-

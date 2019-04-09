@@ -1309,7 +1309,7 @@ ggplot(encode_data, aes(x=class, y=MLLT1, color=class)) +
 dev.off()
 
 
-pdf('cl20181108_LMNB1_and_elongation.pdf', useDingbats=F, width=8, height=6)
+pdf('Figure_2_LMNB1_and_elongation.pdf', useDingbats=F, width=8, height=6)
 plot_grid(fig2A, fig2C, fig2B, fig2D, fig2E, fig2F, nrow=2,
           rel_widths=c(1,1,.6), align='vh', axis='l',
           labels=c('A', 'C', 'B', 'D', 'E', 'F'))
@@ -1317,7 +1317,7 @@ plot_grid(fig2A, fig2C, fig2B, fig2D, fig2E, fig2F, nrow=2,
 dev.off()
 
 
-pdf('cl20190117_H3K9_dip_and_dnase.pdf', useDingbats=F, width=10, height=8)
+pdf('Figure_S2_H3K9_dip_and_dnase.pdf', useDingbats=F, width=10, height=8)
 plot_grid(figS2A, figS2B, figS2C, figS2D, figS2E, figS2F, figS2G, figS2H,
           figS2I, figS2J, figS2K, figS2L, nrow=3, align='v', axis='l', labels='AUTO')
 
