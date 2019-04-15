@@ -1,0 +1,172 @@
+#!/usr/bin/perl
+
+##========================================================================
+##
+## Author: Joshua Starmer <josh.starmer@gmail.com>, 2015
+## 
+## Copyright (C) 2015, Joshua Starmer
+##
+## This program is free software; you can redistribute it and/or
+## modify it under the terms of the GNU General Public License
+## as published by the Free Software Foundation; either version 2
+## of the License, or (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+## 
+##========================================================================
+
+use strict;
+use warnings;
+
+
+use Getopt::Std;
+
+use constant TRUE  => 1;
+use constant FALSE => 0;
+
+use constant BED_CHR    => 0;
+use constant BED_START  => 1;
+use constant BED_STOP   => 2;
+use constant BED_ID     => 3;
+#use constant BED_STRAND => 5;
+use constant COVERAGE_POS   => 4;
+use constant COVERAGE_COUNT => 5;
+use constant VIS_COVERAGE_POS   => 9;
+use constant VIS_COVERAGE_COUNT => 10;
+
+
+
+my $sHelp = <<END_OF_HELP;
+
+Usage: peakCenters [options] domains_analysis.bed <chipSeq.bam | chipSeq.bed> > domains_centers.bed
+
+This program takes an "_analysis.bed" or "_vis.bed" file 
+(output from hiddenDomains) and a ChIP-seq BAM (or BED) file and identifies 
+the center of peaks.
+
+peakCenters requires bedtools to be installed on the system.
+
+Options
+
+-n  NUMBER
+    This will add NUMBER bases before and after the start and stop coordinates
+    for the peak. The default value is 100. You can set it to 0 if you just
+    want the peak coordinates.
+
+-v
+    Process a "_vis.bed" file instead of an "_analysis.bed" file.
+
+-h
+    Print this help information.
+
+
+END_OF_HELP
+
+if (-t STDIN && !@ARGV) {
+    print STDERR $sHelp;
+    exit 1;
+}
+
+
+# process the command line arguments
+my %opts; # a hash table to store file names passed in as agruments
+getopts('hn:v', \%opts);
+
+if ($opts{'h'}) { # print help and exit
+    print STDERR $sHelp;
+    exit 1;
+}
+
+my $numBases = 100;
+if (defined($opts{'n'})) {
+    $numBases = $opts{'n'};
+}
+
+my $processVis = FALSE;
+if ($opts{'v'}) {
+    print STDERR "Processing a _vis.bed file...\n";
+    $processVis = TRUE;
+}
+
+my $domainFile = shift(@ARGV);
+my $bamFile = shift(@ARGV);
+
+my $tempFile = $domainFile."_peakCenters_temp.txt";
+
+print STDERR "Calculating read coverage per base in each domain...\n";
+
+`bedtools coverage -d -a $domainFile -b $bamFile > $tempFile`;
+
+print STDERR "Identifying the peak locations...\n";
+
+open(FILE, "<".$tempFile) || die("Could not open $tempFile $!\n");
+my %maxPos;
+my %maxCount;
+while(my $line = <FILE>) {
+    chomp($line);
+    my @data = split(/\t/, $line);
+    
+    my $id = $data[BED_CHR]."\t".$data[BED_START]."\t".$data[BED_STOP]."\t".$data[BED_ID];
+
+    my $count;
+    my $pos;
+    if (!$processVis) {
+	$count = $data[COVERAGE_COUNT];
+	$pos   = $data[COVERAGE_POS];
+    } else {
+	$count = $data[VIS_COVERAGE_COUNT];
+	$pos   = $data[VIS_COVERAGE_POS];
+    }
+
+    if (defined($maxPos{$id})) {
+	if ($maxCount{$id} < $count) {
+
+	    $maxCount{$id} = $count;
+	    $maxPos{$id} = $pos;
+
+	} elsif ($maxCount{$id} == $count) {
+	    
+	    $maxPos{$id} .= "\t".$pos;
+	    
+	}
+    } else {
+	$maxPos{$id} = $pos;
+	$maxCount{$id} = $count;
+    }
+}
+close(FILE);
+
+foreach my $id (sort(keys(%maxPos))) {
+    my ($chr, $start, $stop, $domain_id) = split(/\t/, $id);
+
+    my @positions = split(/\t/, $maxPos{$id});
+    
+    my $minPos = 100000000;
+    my $maxPos = 0;
+    foreach my $pos (@positions) {
+	if ($minPos > $pos) {
+	    $minPos = $pos;
+	}
+	if ($maxPos < $pos) {
+	    $maxPos = $pos;
+	}
+    }
+    if ($minPos == $maxPos) {
+	$maxPos++;
+    }
+
+    my $genomePosStart = $start + $minPos - 1 - $numBases;
+    my $genomePosStop  = $start + $maxPos - 1 + $numBases;
+
+    print $chr."\t".$genomePosStart."\t".$genomePosStop."\t".$domain_id."\n";
+}
+
+
+`rm $tempFile`;

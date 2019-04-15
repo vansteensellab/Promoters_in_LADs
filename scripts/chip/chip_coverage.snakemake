@@ -1,0 +1,300 @@
+import yaml
+import os
+import inspect
+import re
+
+filename = inspect.getframeinfo(inspect.currentframe()).filename
+chip_path = os.path.dirname(os.path.abspath(filename))
+
+include: config["chip_align"]
+
+
+with open(config['chip_align_config']) as c:
+    config.update(yaml.load(c))
+
+
+def iter_expirements(config, celltype='all'):
+    if type(celltype)==str:
+        if celltype=='all':
+            ct_list = config['experiment'].keys()
+        else:
+            ct_list = [celltype]
+    else:
+        ct_list = celltype
+    for ct in ct_list:
+        for experiment in config['experiment'][ct]:
+            exp_dict = config['experiment'][ct][experiment]
+            for target in exp_dict:
+                target_dict = exp_dict[target]
+                for sample in target_dict:
+                    yield((ct, experiment, target, sample, target_dict[sample]))
+
+
+
+def get_all(config):
+    regex_means = '%s/means/%s_%s_%s_%s.txt'
+    regex_dmeans = '%s/domain_means/%s_%s_%s_%s.txt'
+    regex_peak = '%s/nearest_peak/%s_%s_%s_%s.txt'
+    regex_nearest = '%s/nearest_domains-%i-%s/%s_%s_%s_%s.txt'
+    regex_domain = '%s/domains_call/%s_%s_%s_%s.txt'
+    regex_window = '%s/window/%s_%s_%s_%s_%s_%s_%i_%i_%i.txt.gz'
+    celltype = config['celltype']
+    if 'domain_means' in config:
+        for domain in config['domain_means']:
+            for exp_list in iter_expirements(config, celltype):
+                ct, experiment, target, sample, info = exp_list
+                yield(regex_dmeans % (config['outdir'], domain, experiment,
+                                      target, sample))
+
+    if 'bed_summary' in config:
+        for bed in config['bed_summary']:
+            for exp_list in iter_expirements(config, celltype):
+                ct, experiment, target, sample, info = exp_list
+                yield(regex_means % (config['outdir'], bed, experiment,
+                                     target, sample))
+    if 'bed_window' in config:
+        for bed in config['bed_window']:
+            window_params = config['window_params'][bed]
+            for refpoint in window_params['refpoint']:
+                for exp_list in iter_expirements(config, celltype):
+                    ct, experiment, target, sample, info = exp_list
+                    for r in range(0, len(info['treatment'])):
+                        r_str = 'r%i' % (r + 1)
+                        yield(regex_window % (config['outdir'], bed,
+                                              experiment, target, r_str,
+                                              sample, refpoint,
+                                              window_params['a'],
+                                              window_params['b'],
+                                              window_params['binsize']))
+                    yield(regex_window % (config['outdir'], bed,
+                                          experiment, target, "control",
+                                          sample, refpoint,
+                                          window_params['a'],
+                                          window_params['b'],
+                                          window_params['binsize']))
+    if 'bed_nearest_peak' in config:
+        for bed in config['bed_nearest']:
+            for exp_list in iter_expirements(config, celltype):
+                ct, experiment, target, sample, info = exp_list
+                yield(regex_nearest % (config['outdir'], bed, experiment,
+                                       target, sample))
+    if 'bed_nearest_peak' in config:
+        for bed in config['bed_nearest_peak']:
+            for exp_list in iter_expirements(config, celltype):
+                ct, experiment, target, sample, info = exp_list
+                yield(regex_peak % (config['outdir'], bed, experiment,
+                                       target, sample))
+    if 'bed_nearest_domains' in config:
+        for bed in config['bed_nearest_domains']:
+            for exp_list in iter_expirements(config, celltype):
+                ct, experiment, target, sample, info = exp_list
+                width_list = info['hiddendomain_width']
+                for w in width_list:
+                    yield(regex_nearest % (config['outdir'], w,
+                                           info['hiddendomain_p'], bed,
+                                           experiment, target, sample))
+
+get_all(config)
+
+rule all_chip:
+    input:
+        lambda wildcards: get_all(config)
+
+
+
+def get_peaks(config, wildcards):
+    exp_dict = config['experiment'][config['celltype']][wildcards.experiment]
+    if wildcards.peaktype.startswith('domains'):
+        domain, bs, p = wildcards.peaktype.split(sep='-')
+        fname = '%s/%s/%s/%s/%s/%s_%s_%s_%s_shared.txt' % (config['chip_out'],
+                                                        config['genome'],
+                                                        wildcards.peaktype,
+                                                        config['celltype'],
+                                                        wildcards.experiment,
+                                                        wildcards.target,
+                                                        wildcards.sample,
+                                                        bs, p)
+    else:
+        fname = '%s/%s/%s/%s/%s/%s_%s_shared.txt' % (config['chip_out'],
+                                                     config['genome'],
+                                                     wildcards.peaktype,
+                                                     config['celltype'],
+                                                     wildcards.experiment,
+                                                     wildcards.target,
+                                                     wildcards.sample)
+
+    yield(fname)
+
+
+rule overlap_with_peak:
+    input:
+        bed=lambda wildcards: config['bed_summary'][wildcards.bed],
+        peaks=lambda wildcards: get_peaks(config, wildcards)
+    output:
+        "{outdir}/{peaktype}_call/{bed}_{experiment}_{target}_{sample}.txt"
+    shell:
+        "bedtools intersect -c -a {input.bed} -b {input.peaks} "
+        "    > {output}"
+
+
+rule nearestPeak:
+    input:
+        bed=lambda wildcards: config['bed_nearest_domains'][wildcards.bed],
+        peaks=lambda wildcards: get_peaks(config, wildcards)
+    output:
+        "{outdir}/nearest_{peaktype}/{bed}_{experiment}_{target}_{sample}.txt"
+    shell:
+        "{chip_path}/scripts/compute_nearest.R {input.bed} {input.peaks} "
+        "    > {output}"
+
+
+def get_bw(config, wildcards):
+    if wildcards.rep=='control':
+        exp_dict = config['experiment'][config['celltype']][wildcards.experiment]
+        control_list = exp_dict[wildcards.target][wildcards.sample]['control']
+        control_str = '_'.join(control_list)
+        yield('%s/%s/coverage/control/%s.bw' % (config['chip_out'],
+                                                config['genome'],
+                                                control_str))
+    else:
+        exp_dict = config['experiment'][config['celltype']][wildcards.experiment]
+        r = int(wildcards.rep.replace('r', '')) - 1
+        rep_list = exp_dict[wildcards.target][wildcards.sample]['treatment']
+        yield('%s/%s/coverage/%s/%s/%s_%s_%s_%s.bw' % (config['chip_out'],
+                                                       config['genome'],
+                                                       config['celltype'],
+                                                       wildcards.experiment,
+                                                       wildcards.target,
+                                                       wildcards.sample,
+                                                       wildcards.rep,
+                                                       rep_list[r]))
+
+
+
+
+rule compute_matrix:
+    input:
+        bw=lambda wildcards: list(get_bw(config, wildcards)),
+        bed=lambda wildcards: config['bed_window'][wildcards.bed]
+    params:
+        a='{a}',
+        b='{b}',
+        refpoint='{refpoint}',
+        bs='{bs}'
+    output:
+        ('{outdir}/window/{bed}_{experiment}_{target}_{rep}_{sample}_'
+         '{refpoint}_{a}_{b}_{bs}.txt.gz')
+    threads:
+        5
+    shell:
+        "computeMatrix reference-point -S {input.bw} -R {input.bed} "
+        "                              --referencePoint {params.refpoint}"
+        "                              -o {output}"
+        "                              -p {threads}"
+        "                              -bs {params.bs}"
+        "                              -a {params.a} -b {params.b}"
+
+
+def get_exp(config, wildcards):
+    exp_dict = config['experiment'][config['celltype']][wildcards.experiment]
+    rep_list = exp_dict[wildcards.target][wildcards.sample]['treatment']
+    for r in range(0,len(rep_list)):
+        yield('%s/%s/filtered/%s/%s/%s_%s_r%i_%s.bam' % (config['chip_out'],
+                                                         config['genome'],
+                                                         config['celltype'],
+                                                         wildcards.experiment,
+                                                         wildcards.target,
+                                                         wildcards.sample,
+                                                         r + 1, rep_list[r]))
+
+def get_exp_label(config, wildcards):
+    exp_dict = config['experiment'][config['celltype']][wildcards.experiment]
+    rep_list = exp_dict[wildcards.target][wildcards.sample]['treatment']
+    for r in range(0,len(rep_list)):
+        yield('%s_%s_%s_r%i_%s' % (wildcards.experiment, wildcards.target,
+                                   wildcards.sample, r + 1, rep_list[r]))
+
+
+def get_ctrl_input(config, wildcards):
+    ip_dict = config['experiment'][config['celltype']][wildcards.experiment]
+    srr_list = ip_dict[wildcards.target][wildcards.sample]['control']
+    srr_str = '_'.join(srr_list)
+    return('%s/%s/filtered/control/%s.bam' % (config['chip_out'], config['genome'],
+                                              srr_str))
+
+
+rule domain_means:
+    input:
+        '{outdir}/domain_means/{bed}_{experiment}_{target}_{sample}.count',
+        '%s/%s/idxstats/%s/{experiment}/{target}_{sample}.txt' % (config['chip_out'],
+                                                                  config['genome'],
+                                                                  config['celltype'])
+    output:
+        '{outdir}/domain_means/{bed}_{experiment}_{target}_{sample}.txt'
+    shell:
+        "{chip_path}/scripts/compute_domain.R --counts {input[0]}"
+        "                                     --idxstats {input[1]} > {output}"
+
+
+
+rule domain_counts:
+    input:
+        bed=lambda wildcards: config['domain_means'][wildcards.bed],
+        exp=lambda wildcards: get_exp(config, wildcards),
+        exp_bai=lambda wildcards: ['%s.bai' % (fname) for fname in
+                                   get_exp(config, wildcards)],
+        ip=lambda wildcards: get_ctrl_input(config, wildcards),
+        ip_bai=lambda wildcards: '%s.bai' % (get_ctrl_input(config, wildcards)),
+    params:
+        exp_label=lambda wildcards: list(get_exp_label(config, wildcards))
+    threads:
+        10
+    output:
+        temp('{outdir}/domain_means/{bed}_{experiment}_{target}_{sample}.count')
+    shell:
+        "{chip_path}/scripts/compute_domain.sh -d {input.bed}"
+        "                                      -b \"{input.ip} {input.exp}\""
+        "                                      -l \"input {params.exp_label}\""
+        "                                      -t {threads}"
+        "                                      -o {output}"
+
+
+rule means:
+    input:
+        bed=lambda wildcards: config['bed_summary'][wildcards.bed],
+        exp=lambda wildcards: get_exp(config, wildcards),
+        ip=lambda wildcards: get_ctrl_input(config, wildcards),
+        counts='{outdir}/chip_counts/{bed}_{experiment}_{target}_{sample}.txt'
+    output:
+        '{outdir}/means/{bed}_{experiment}_{target}_{sample}.txt'
+    run:
+        input_exp = ','.join(input.exp)
+        shell("{chip_path}/scripts/compute_means.R --exp {input_exp} "
+              "                                    --bed {input.bed}"
+              "                                    --counts {input.counts}"
+              "                                    --input {input.ip} > {output}")
+
+
+
+rule multiBamSummary:
+    input:
+        bed=lambda wildcards: config['bed_summary'][wildcards.bed],
+        exp=lambda wildcards: get_exp(config, wildcards),
+        ip=lambda wildcards: get_ctrl_input(config, wildcards),
+        exp_bai=lambda wildcards: ['%s.bai' % (s) for s in
+                                   get_exp(config, wildcards)],
+        ip_bai=lambda wildcards: '%s.bai' % (get_ctrl_input(config, wildcards))
+    params:
+        exp_label=lambda wildcards: list(get_exp_label(config, wildcards))
+    output:
+        '{outdir}/chip_counts/{bed}_{experiment}_{target}_{sample}.npz',
+        '{outdir}/chip_counts/{bed}_{experiment}_{target}_{sample}.txt'
+    threads:
+        5
+    shell:
+        "multiBamSummary BED-file -p {threads}"
+        "                         --BED {input.bed}"
+        "                         -l Input {params.exp_label}"
+        "                         -b {input.ip} {input.exp}"
+        "                         -out {output[0]}"
+        "                         --outRawCounts {output[1]}"

@@ -1,0 +1,179 @@
+input: /DATA/usr/c.leemans/data/tracks/hg38
+
+outdir: /DATA/usr/c.leemans/projects/Promoters_in_LADs/data/promoter_expression
+
+chrom_sizes:
+    /DATA/usr/c.leemans/data/hg38/hg38.chrom.sizes
+
+genome:
+    /DATA/usr/c.leemans/data/hg38/hg38_1-22_XYM.fa
+
+tissue_expression:
+    hg38_fair+new_CAGE_peaks_phase1and2_counts.osc.txt.gz
+
+transcripts:
+    gencode.v27: gencode.v27.annotation.gff3.gz
+
+transcript_selection:
+    fantom: hg38_fair+new_CAGE_peaks_phase1and2.bed.gz
+
+enhancers:
+    genehancer.v4.6:
+        genehancer_v4.6_20171023.txt.gz
+
+tss_body_expression:
+    PROseq.rep1:
+        plus:
+            proseq_rep1_plus_K562_hg38_SRR1554311.bw
+        min:
+            proseq_rep1_min_K562_hg38_SRR1554311.bw
+    PROseq.rep2:
+        plus:
+            proseq_rep2_plus_K562_hg38_SRR1554312.bw
+        min:
+            proseq_rep2_min_K562_hg38_SRR1554312.bw
+
+expression:
+    PROseq.rep1:
+        plus:
+            proseq_rep1_plus_K562_hg38_SRR1554311.bw
+        min:
+            proseq_rep1_min_K562_hg38_SRR1554311.bw
+    PROseq.rep2:
+        plus:
+            proseq_rep2_plus_K562_hg38_SRR1554312.bw
+        min:
+            proseq_rep2_min_K562_hg38_SRR1554312.bw
+    CAGE.FANTOM.rep1:
+        plus:
+            K562_CAGE_hg38_min_rep1.CNhs12334.10824-111C5.bw
+        min:
+            K562_CAGE_hg38_plus_rep1.CNhs12334.10824-111C5.bw
+    CAGE.FANTOM.rep2:
+        plus:
+            K562_CAGE_hg38_plus_rep2.CNhs12335.10825-111C6.bw
+        min:
+            K562_CAGE_hg38_min_rep2.CNhs12335.10825-111C6.bw
+    CAGE.FANTOM.rep3:
+        plus:
+            K562_CAGE_hg38_plus_rep3.CNhs12336.10826-111C7.bw
+        min:
+            K562_CAGE_hg38_min_rep3.CNhs12336.10826-111C7.bw
+    CAGE.ENC.rep1:
+        plus:
+            CAGE_K562_rep1_min_ENCFF323VGR.bw
+        min:
+            CAGE_K562_rep1_plus_ENCFF323VGR.bw
+    CAGE.ENC.rep2:
+        plus:
+            CAGE_K562_rep2_min_ENCFF997CHB.bw
+        min:
+            CAGE_K562_rep2_plus_ENCFF997CHB.bw
+    GROcap:
+        plus:
+            grocap_wTAP_plus_K562_hg38_SRR1552480.bw
+        min:
+            grocap_wTAP_min_K562_hg38_SRR1552480.bw
+    K562.B1:
+        plus:
+            SuRE23_hg38_K562_B1.cov.plus.bw
+        min:
+            SuRE23_hg38_K562_B1.cov.minus.bw
+    K562.B2:
+        plus:
+            SuRE23_hg38_K562_B2.cov.plus.bw
+        min:
+            SuRE23_hg38_K562_B2.cov.minus.bw
+
+domain_dir:
+    /DATA/usr/t.v.schaik/proj/3D_nucleus/results/ts180110_4DN_DataProcessing/results/HMM/bin-5kb
+
+domains:
+    K562:
+        LAD:
+            K562_LMNB1-5kb-combined_AD.bed.gz
+
+
+
+tss_window:
+    H3K36me3.r1:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/K562/Schmidl2015/H3K36me3_chipmentation_r1_SRR2085877.bw
+    H3K36me3.r2:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/K562/Schmidl2015/H3K36me3_chipmentation_r2_SRR2085878.bw
+    H3K36me3.ctrl:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/control/SRR2085882_SRR2085883_SRR2085884_SRR2085885_SRR2085886.bw
+    H3K9me3.r1:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/K562/Salzberg2017/H3K9me3_ab8898_r1_SRR2148320.bw
+    H3K9me3.ctrl:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/control/SRR2148307.bw
+    H3K9me2.r1:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/K562/Salzberg2017/H3K9me2_ab1220_r1_SRR2148301.bw
+    H3K9me2.r2:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/K562/Salzberg2017/H3K9me2_ab1220_r2_SRR3503783.bw
+    H3K9me2.ctrl:
+        /DATA/usr/c.leemans/projects/chip_snake/hg38/coverage/control/SRR2148307.bw
+    Dam16.centre.r1:
+        /DATA/usr/c.leemans/data/tracks/hg38/K562_r1_Dam16-gatc_centre.bw
+    Dam16.centre.r2:
+        /DATA/usr/c.leemans/data/tracks/hg38/K562_r2_Dam10_1-gatc_centre.bw
+    LMNB1.centre.r1:
+        /DATA/usr/c.leemans/data/tracks/hg38/K562_r1_LMNB1-gatc_centre.bw
+    LMNB1.centre.r2:
+        /DATA/usr/c.leemans/data/tracks/hg38/K562_r2_LMNB1-gatc_centre.bw
+    TTseq.rep1.plus:
+        /DATA/usr/c.leemans/data/tracks/hg38/TTseq_K562_rep1_plus_hg38.bw
+    TTseq.rep2.plus:
+        /DATA/usr/c.leemans/data/tracks/hg38/TTseq_K562_rep2_plus_hg38.bw
+    TTseq.rep1.min:
+        /DATA/usr/c.leemans/data/tracks/hg38/TTseq_K562_rep1_minus_hg38.bw
+    TTseq.rep2.min:
+        /DATA/usr/c.leemans/data/tracks/hg38/TTseq_K562_rep2_minus_hg38.bw
+    DNAse:
+        /DATA/usr/c.leemans/data/tracks/hg38/K562_DNAse_PE36nt_ENCFF413AHU.bigWig
+
+window_type:
+    H3K36me3.r1: sum
+    H3K36me3.r2: sum
+    H3K36me3.ctrl: sum
+    H3K9me3.r1: sum
+    H3K9me3.r2: sum
+    LMNB1.log2: mean
+    H3K9me3.ctrl: sum
+    H3K9me2.r1: sum
+    H3K9me2.r2: sum
+    H3K9me2.ctrl: sum
+    Dam16.centre.r1: sum
+    Dam16.centre.r2: sum
+    LMNB1.centre.r1: sum
+    LMNB1.centre.r2: sum
+    TTseq.rep1.plus: mean
+    TTseq.rep2.plus: mean
+    TTseq.rep1.min: mean
+    TTseq.rep2.min: mean
+    DNAse: mean
+
+
+missingDataAsZero:
+    H3K36me3.r1: False
+    H3K36me3.r2: False
+    H3K36me3.ctrl: False
+    H3K9me3.r1: False
+    H3K9me3.r2: False
+    H3K9me3.ctrl: False
+    H3K9me2.r1: False
+    H3K9me2.r2: False
+    H3K9me2.ctrl: False
+    Dam16.centre.r1: True
+    Dam16.centre.r2: True
+    LMNB1.centre.r1: True
+    LMNB1.centre.r2: True
+    TTseq.rep1.plus: True
+    TTseq.rep2.plus: True
+    TTseq.rep1.min: True
+    TTseq.rep2.min: True
+    DNAse: True
+
+window_param:
+    a:  22000
+    b:  22000
+    bs: 100

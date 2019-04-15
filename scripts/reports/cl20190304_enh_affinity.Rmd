@@ -1,0 +1,468 @@
+```{r}
+library(data.table)
+library(ggplot2)
+library(rtracklayer)
+library(ggbeeswarm)
+library(reshape2)
+library(gdata)
+library(cowplot)
+library(grid)
+
+## get a table with matching sets
+## table = complete table to take matching sets from
+## class_col = column name of class of interest
+## class = name of class to match the set on
+## order_on = column name to order on
+matchSet <- function(table, class_col, class, order_on){
+  o_vec = order(table[,order_on])
+  o_table = table[o_vec, ]
+  setA = which(o_table[,class_col]==class)
+  setB = c(setA + 1, setA -1)
+  ## check if setB is all within the possible indexes
+  setB = setB[setB %in% 1:length(o_vec)]
+  ## can also return o_table[unique(c(setA, setB)), ]
+  ## but this way order is perserved.
+  i_vec = o_vec[unique(c(setA, setB))]
+  return(table[i_vec[order(i_vec)], ])
+}
+
+
+COLi<-"#00BBFF11" #dot color for iLAD promoters
+COL_lad = COL_nad = c("#FF0000", "#0077FF")
+names(COL_lad)<-c('LAD', 'iLAD')
+
+names(COL_nad)<-c('NAD', 'iNAD')
+
+#color vector for plotting:
+COL_class<-c("#A020F0", "#FFA500", "#006400", "#7e7e7e", "#0077FF")
+names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
+
+COL<-c("#A020F0", "#FFA500", "#006400")
+names(COL)<-c("repressed", "escaper", "inactive")
+
+E_exp = read.table('../cl20180517_hg38_snakemake/expression/genehancer.v4.6_stranded_expression.txt.gz',
+                       stringsAsFactors=F, header=T, row.names=1)
+
+for (col in colnames(E_exp)){
+    E_exp[which(is.na(E_exp[,col])),col] = 0
+}
+
+E_tss = read.table('../cl20180517_hg38_snakemake/selection/genehancer.v4.6_selection.txt',
+                       stringsAsFactors=F, row.names=3,
+                       col.names=c('seqnames', 'tss', 'genehancer_id'))
+
+E_domain = read.table('../cl20180517_hg38_snakemake/domains/genehancer.v4.6_domains.txt',
+                      stringsAsFactors=F, header=T, row.names=1)
+
+E_cpg =  read.table('../cl20180517_hg38_snakemake/cpg/genehancer.v4.6_150_150.txt',
+                    stringsAsFactors=F, header=T, row.names=4)
+
+E_island =  read.table('../cl20180517_hg38_snakemake/cpg/genehancer.v4.6_center_islands.txt',
+                       stringsAsFactors=F, header=T, row.names=1, sep='\t')
+
+E_dist = read.table('../cl20180517_hg38_snakemake/tss_dist/genehancer.v4.6_to_gencode.v27_tss.txt',
+           stringsAsFactors=F)
+e_vec = unique(E_dist[E_dist[,2] > 1150, 1])
+E = data.frame(E_tss[e_vec, ], E_exp[e_vec, ], E_domain[e_vec, ],
+               cpgNum=E_cpg[e_vec, 'CpG'],
+               island=ifelse(E_island[e_vec, 'cpg_name']=='.', 0, 1))
+E$K562_GROcap = E$GROcap_plus + E$GROcap_min
+E$K562.B1_sense = E$K562.B1_plus + E$K562.B1_min
+E$K562.B2_sense = E$K562.B2_plus + E$K562.B2_min
+E$HT1080.B1_sense =  E$HT1080.B1_plus + E$HT1080.B1_min
+E$HT1080.B2_sense =  E$HT1080.B2_plus + E$HT1080.B2_min
+
+E$K562_SuRE = rowMeans(E[,c('K562.B1_sense', 'K562.B2_sense')])
+E$HT1080_SuRE = rowMeans(E[,c('HT1080.B1_sense', 'HT1080.B2_sense')])
+
+sd_jit = min(E$K562_GROcap[E$K562_GROcap>0])
+jit = rnorm(nrow(E), sd = sd_jit / 20)
+
+E$K562_GROcap_jitter = log10(E$K562_GROcap + jit + sd_jit / 2)
+
+pseudo_log10 <- function(val_vec){
+    Pseud=min(val_vec[val_vec > 0], na.rm=TRUE)/2
+    val_vec = val_vec + Pseud
+    return(log10(val_vec))
+}
+
+for (col in c('K562_SuRE', 'HT1080_SuRE', 'K562_GROcap')){
+    E[,col] = pseudo_log10(E[,col])
+}
+
+create_RM <-function(data, x, y, ad){
+    #then calculate running mean for iLAD promoters:
+    #sort by SuRE and then random for ties
+    o = order(data[,x],sample(c(1:nrow(data))))
+
+    x_sorted = data[o,x]
+    y_sorted = data[o,y]
+    ad_sorted = data[o,ad]
+
+    n<-200 #number of windows
+    w<-1001 #window width (number of datapoints); if n*w > nrow(P) then windows overlap
+    s<-round(seq(from=w/2+0.0001, to=nrow(data)-w/2, length.out=n))
+    RM<-data.frame(x.low=rep(NA,n), x.mean=rep(NA,n), x.hi=rep(NA,n), y.AD=rep(NA,n), y.iAD=rep(NA,n))
+    RM$x.low=x_sorted[s-floor(w/2)]
+    for(i in 1:n){RM$x.mean[i]=mean(x_sorted[(s[i]-floor(w/2)):(s[i]+floor(w/2))], na.rm=TRUE)}
+    RM$x.hi=x_sorted[s+floor(w/2)]
+    for(i in 1:n)
+      {t<-data.frame(AD=ad_sorted[(s[i]-floor(w/2)):(s[i]+floor(w/2))],
+                     y=y_sorted[(s[i]-floor(w/2)):(s[i]+floor(w/2))])
+       RM$y.AD[i]<-mean(t$y[t$AD==1], na.rm=TRUE)
+       RM$y.iAD[i]<-mean(t$y[t$AD==0], na.rm=TRUE)
+      }
+    #add first datapoint (SuRE equals pseudocount)
+    RM1<-RM[0,] #empty df
+    RM1[1,]<-c(rep(min(x_sorted),3), mean(y_sorted[x_sorted==min(x_sorted) & ad_sorted==1]), mean(y_sorted[x_sorted==min(x_sorted) & ad_sorted==0]))
+    RM<-rbind(RM1, RM)
+    rm(RM1)
+    return(RM)
+}
+RM_E = create_RM(E, 'K562_SuRE', 'K562_GROcap', ad='K562_LAD')
+
+
+E$LRS_LAD<- E$K562_GROcap - approx(x=RM_E$x.mean, y=RM_E$y.iAD,
+                                   xout=E$K562_SuRE, rule=2)$y
+
+mean(E[E$K562_LAD==1& E$K562_SuRE > 0 & E$K562_SuRE < 1.5,'LRS_LAD'])
+
+
+E$class = NA
+E$class[which(E$K562_SuRE > 0 & E$K562_GROcap > -2 &
+              E$K562_LAD==1)] = 'escaper'
+E$class[which(E$K562_SuRE > 0 & E$K562_GROcap < -2.8 &
+              E$K562_LAD==1)] = 'repressed'
+E$class[which(E$K562_SuRE < 0 & E$K562_GROcap < -2.8 &
+              E$K562_LAD==1)] = 'inactive'
+E$class[which(E$K562_LAD==0)] = 'iLAD'
+
+E$e_match = NA
+E$e_match[which(E$K562_SuRE > 0 & E$K562_GROcap > -2 &
+              E$K562_LAD==1)] = 'escaper'
+E$e_match[which(E$K562_LAD==0)] = 'iLAD'
+
+
+e_match = matchSet(E[-which(E$class=='iLAD' | (
+                            E$K562_GROcap < -2 &
+                            E$K562_GROcap > -2.8)), ], 'class', 'escaper', 'K562_SuRE')
+E[rownames(e_match)[is.na(e_match$class)], 'e_match'] = 'repressed'
+E$class = factor(E$class)
+
+E_color = c(iLAD="#0077FF", escaper="#FFA500", repressed="#A020F0")
+
+lad_names = c(LAD=paste0('LAD; n=', table(E$K562_LAD)['1']),
+              iLAD=paste0('iLAD; n=', table(E$K562_LAD)['0']))
+E$K562_LAD_n = factor(ifelse(E$K562_LAD==1, lad_names['LAD'], lad_names['iLAD']))
+COL_lad_n = COL_lad
+names(COL_lad_n) = lad_names
+
+
+RM_melt = melt(RM_E, measure.vars=c('y.iAD', 'y.AD'))
+RM_melt$variable = ifelse(RM_melt$variable=='y.AD',
+                          lad_names['LAD'], lad_names['iLAD'])
+
+figA = ggplot(E, aes(x=K562_SuRE, y=K562_GROcap_jitter, color=K562_LAD_n)) +
+                  geom_point(data=E[E$K562_LAD==0, ], size=0.5, alpha=0.1, shape=16) +
+                  geom_point(data=E[E$K562_LAD==1, ], size=1.6, alpha=0.5, shape=16) +
+                  theme_bw() +
+                  geom_line(data=RM_E, aes(x=x.mean, y=y.AD), color='black',  size=1) +
+                  geom_line(data=RM_E, aes(x=x.mean, y=y.iAD), color='black',  size=1) +
+                  geom_line(data=RM_melt, aes(x=x.mean, y=value, color=variable), size=0.5) +
+                  labs(y=expression(log[10](GROcap)),
+                       x=expression(log[10](SuRE)), size=1) +
+                  theme(panel.grid.minor = element_blank(),
+                        panel.grid.major = element_line(size = .5, color = "grey"),
+                        axis.line = element_line(size=.7, color = "black"),
+						legend.background = element_rect(fill="transparent"),
+                        text = element_text(size=14),
+						legend.justification =c(0,1),
+		 			    legend.position=c(0.05,0.95),
+						legend.title=element_blank()) +
+                  scale_color_manual(values=COL_lad_n) +
+                  coord_equal(ratio=1) +
+          		  guides(colour = guide_legend(override.aes = list(size=1,linetype=0, alpha=1)))
+
+
+class_names = paste0(levels(E$class), '; n=',table(E$class))
+names(class_names) = levels(E$class)
+E$class_n = E$class
+levels(E$class_n) = class_names
+COL_class_n = COL_class[names(class_names)]
+names(COL_class_n) = class_names
+
+
+y_line = approx(x=RM_E$x.mean, y=RM_E$y.ilad, xout=0.3, rule=2)$y - 1
+e_classes = E[which(E$class %in% c('repressed', 'escaper', 'inactive')),]
+
+figB = ggplot(E[E$K562_LAD==0, ], aes(x=K562_SuRE, y=K562_GROcap_jitter,
+                                          color=class_n)) +
+    geom_line(data=RM_E[RM_E$y.iAD > -1.5,],
+              aes(x=x.mean, y=y.iAD - 0.5), color='black',
+              linetype='dotdash', size=0.5, show.legend=F) +
+    geom_hline(yintercept=-2, linetype='dotdash', size=0.5) +
+    geom_hline(yintercept=-2.8, linetype='dotdash', size=0.5) +
+    geom_point(size=0.5, alpha=0.1, shape=16) +
+    geom_point(data=e_classes, size=2, shape=16) +
+    theme_bw() +
+    geom_line(data=RM_E, aes(x=x.mean, y=y.iAD), color='black',  size=1) +
+    geom_line(data=RM_E, aes(x=x.mean, y=y.iAD),
+             color=COL_lad['iLAD'], size=0.5) +
+    labs(y=expression(log[10](GROcap)),
+         x=expression(log[10](SuRE)), size=1) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.line = element_line(size=.7, color = "black"),
+          legend.background = element_rect(fill="transparent"),
+          text = element_text(size=14),
+          legend.justification =c(0,1),
+          legend.position=c(0.05,0.95),
+          legend.title=element_blank()) +
+    scale_color_manual(values=COL_class_n) +
+    coord_equal(ratio=1)
+
+
+
+ggplot(E[E$K562_LAD==1 & !is.na(E$class),], aes(x=K562_SuRE, color=class)) +
+    geom_density() +
+    scale_color_manual(values=E_color)
+
+
+e_subset = E[E$e_match%in%c('escaper', 'repressed'), ]
+
+bed_subset = data.frame(e_subset$seqnames,
+                        e_subset$tss - 150,
+                        e_subset$tss + 150,
+                        paste(rownames(e_subset), e_subset$class, sep=';'))
+
+write.table(bed_subset, '../raw_data/genehancer_esc_matched_300bp.bed', sep='\t',
+            col.names=F, row.names=F, quote=F)
+
+```
+
+
+
+```{r}
+
+rep1 = fread('../raw_data/K562_rna_rep1_v24_ENCFF172GIN.tsv', key='gene_id')
+rep2 = fread('../raw_data/K562_rna_rep2_v24_ENCFF768TKT.tsv', key='gene_id')
+
+gencode_v24 = import.gff('/DATA/usr/c.leemans/data/tracks/hg38/gencode.v24.annotation.gff3.gz')
+
+
+motif_table = fread(paste0("/DATA/usr/f.comoglio/Annotations/TFDB/",
+                           "Curated_Natoli/motif_metadata.csv"),
+                    header=T, stringsAsFactors=F)
+
+colnames(motif_table)[1:2] = c('motif_id', 'Symbol')
+setkey(motif_table, 'motif_id')
+
+pwm_info = fread('../raw_data/Curated_Natoli/curated_db_pwm_info.txt',
+                 header=T, stringsAsFactors=T, key='motif_id')
+
+motif_table = merge(motif_table, pwm_info)
+
+motif_table = motif_table[,.SD[which.max(nsites), ] , by='Symbol']
+
+gencode_v24 = gencode_v24[gencode_v24$type=='gene']
+
+motif_table[,gene_id:=gencode_v24$gene_id[match(motif_table$Symbol,
+                                                gencode_v24$gene_name)]]
+
+motif_table[,expression:=rowMeans(cbind(rep1[gene_id, 'pme_FPKM'],
+                                        rep2[gene_id, 'pme_FPKM']))]
+ggplot(motif_table, aes(x=log10(expression))) + geom_density()
+
+## 0 seems like a good cut-off for expression
+```
+
+
+
+```
+bedtools getfasta -name \
+                  -bed raw_data/genehancer_esc_matched_300bp.bed \
+                  -fi /DATA/usr/c.leemans/data/hg38/hg38_1-22_XYM.fa \
+                  > raw_data/genehancer_esc_matched_300bp.fa
+
+AffinityProfile -sequence=raw_data/genehancer_esc_matched_300bp.fa \
+                -strand=2 \
+                -psam_list=$REDUCE_SUITE/data/PSAMs/Curated_Natoli.list \
+                -output=raw_data/natoli_affinity_enh
+```
+
+```{r}
+
+affinity_matrix = fread('../raw_data/natoli_affinity_enh/seq_psam.dat',
+                        stringsAsFactors=F)
+
+colnames(affinity_matrix) = gsub('.xml', '', colnames(affinity_matrix))
+affinity_matrix[,class:=gsub('.*;(.*)::.*', '\\1', V1)]
+
+affinity_table = data.table::melt(affinity_matrix, id.vars=c('V1', 'class'),
+                                  variable.name='motif_id', value.name='affinity')
+
+
+motif_table[,is_expressed:=log10(expression) > 0]
+
+active_affinity = merge(affinity_table, motif_table, by='motif_id')
+
+tf_type = fread('../raw_data/12859_2016_1349_MOESM2_ESM.csv',sep='\t',
+                stringsAsFactors=F, key='Symbol')
+
+aff = merge(active_affinity, tf_type[,c("Symbol", "Chromatin Opening Type")], by='Symbol')
+colnames(aff)[ncol(aff)] = 'tf_type'
+aff[,tf_type:=tolower(tf_type)]
+
+
+test_wilcox <- function(data){
+    fit = wilcox.test(affinity ~ class, data=data)
+    if (!is.na(fit$p.value) & fit$p.value < 10^-3){
+        pseudo = min(data[affinity>0,'affinity'])/2
+        data$log_aff = log10(data$affinity + pseudo)
+        print(ggplot(data, aes(x=class, y=log_aff, color=class)) +
+                 geom_quasirandom() +
+                 ggtitle(paste(data[1,'Symbol'], data[1,'tf_type'])) +
+                 geom_boxplot(color='black', width=0.3, alpha=0) +
+                 theme_bw() +
+                 scale_color_manual(values=E_color))
+    }
+    return(data[1,c('class', 'affinity', 'Symbol', 'tf_type')])
+}
+
+pdf('cl20180904_enhancer_TF_affinity_individual.pdf', useDingbats=F, width=5, height=5)
+wilcox_affinity = aff[aff$is_expressed, test_wilcox(.SD), by='motif_id']
+dev.off()
+
+
+get_mean <- function(data){
+    means = colMeans(data[,2:ncol(data)])
+
+    return(data.frame(mean = means, motif_id = names(means)))
+}
+
+
+median_affinity = aff[,list(median=median(affinity)),
+                    by=c('motif_id', 'Symbol', 'Class', 'Family', 'tf_type',
+                         'is_expressed', 'class')]
+
+
+aff_cast = data.table::dcast(median_affinity, motif_id + Symbol + Class + Family +
+                                              tf_type + is_expressed ~ class,
+                             value.var='median')
+aff_cast[,fc:=log10(escaper/esc_match)]
+aff_cast[,exp_type:=ifelse(is_expressed, paste(tf_type, 'active'),
+                           paste(tf_type, 'inactive'))]
+
+aff_cast[,tf_class:=ifelse(tf_type=='pioneer', 'pioneer', 'other TF type')]
+aff_c = aff_cast[is_expressed & is.finite(fc), ]
+
+
+figD = ggplot(aff_c, aes(x=tf_class, y=fc, color=tf_class,
+                                              label=Symbol)) +
+    geom_quasirandom() +
+    theme_bw() +
+    ggtitle('motif affinity') +
+    ylab('log10(escaper/repressed)') +
+    guides(color=F) +
+    stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
+                 color='black', geom = "crossbar", width = 0.4) +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.grid.minor = element_blank())
+
+
+pdf('Figure7_GROcap_vs_SuRE_enh_seperate.pdf', height=4, width=5,
+    useDingbats=F)
+
+
+figA
+figB
+figD + coord_equal(ratio=1)
+dev.off()
+
+
+
+
+figA = ggplot(E, aes(x=K562_SuRE, y=K562_GROcap_jitter, color=K562_LAD_n)) +
+                  geom_point(data=E[E$K562_LAD==0, ], size=1.5, alpha=0.1, shape=16) +
+                  geom_point(data=E[E$K562_LAD==1, ], size=3, alpha=0.5, shape=16) +
+                  theme_bw() +
+                  geom_line(data=RM_E, aes(x=x.mean, y=y.AD), color='black',  size=2) +
+                  geom_line(data=RM_E, aes(x=x.mean, y=y.iAD), color='black',  size=2) +
+                  geom_line(data=RM_melt, aes(x=x.mean, y=value, color=variable), size=1) +
+                  labs(y=expression(log[10](GROcap)),
+                       x=expression(log[10](SuRE)), size=1) +
+                  theme(panel.grid.minor = element_blank(),
+                        panel.grid.major = element_line(size = 1, color = "grey"),
+                        axis.line = element_line(size=.7, color = "black"),
+						legend.background = element_rect(fill="transparent"),
+                        text = element_text(size=14),
+						legend.position="none") +
+                  scale_color_manual(values=COL_lad_n) +
+                  coord_equal(ratio=1) +
+          		  guides(colour = guide_legend(override.aes = list(size=1,linetype=0, alpha=1)))
+
+figB = ggplot(E[E$K562_LAD==0, ], aes(x=K562_SuRE, y=K562_GROcap_jitter,
+                                          color=class_n)) +
+    geom_line(data=RM_E[RM_E$y.iAD > -1.5,],
+              aes(x=x.mean, y=y.iAD - 0.5), color='black',
+              linetype='dotdash', size=1, show.legend=F) +
+    geom_hline(yintercept=-2, linetype='dotdash', size=1) +
+    geom_hline(yintercept=-2.8, linetype='dotdash', size=1) +
+    geom_vline(xintercept=0, linetype='dotdash', size=1) +
+    geom_point(size=1.5, alpha=0.1, shape=16) +
+    geom_point(data=e_classes, size=3, shape=16) +
+    theme_bw() +
+    geom_line(data=RM_E, aes(x=x.mean, y=y.iAD), color='black',  size=2) +
+    geom_line(data=RM_E, aes(x=x.mean, y=y.iAD),
+             color=COL_lad['iLAD'], size=1) +
+    labs(y=expression(log[10](GROcap)),
+         x=expression(log[10](SuRE)), size=1) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(size = 1, color = "grey"),
+          axis.line = element_line(size=1, color = "black"),
+          legend.background = element_rect(fill="transparent"),
+          text = element_text(size=14),
+          legend.position="none") +
+    scale_color_manual(values=COL_class_n) +
+    coord_equal(ratio=1)
+
+
+
+figD = ggplot(aff_c, aes(x=tf_class, y=fc, color=tf_class,
+                                              label=Symbol)) +
+    geom_quasirandom(size=2.5) +
+    theme_bw() +
+    ggtitle('motif affinity') +
+    ylab('log10(escaper/repressed)') +
+    guides(color=F) +
+    stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
+                 color='black', geom = "crossbar", width = 0.4) +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.grid.minor = element_blank())
+
+blank <- grid.rect(gp=gpar(col=NA))
+tiff('Figure7_SuRE_vs_GROcap_enh.tiff', width = 16, height = 12, units='in', res=300)
+plot_grid(figA, blank, figB, figD, labels=c('A', 'C', 'B', 'D'), nrow=2, align='v',
+          rel_widths=c(1.8,1))
+dev.off()
+
+
+```
+
+
+```
+awk '/escaper/{print;getline;print}' raw_data/genehancer_esc_matched_300bp.fa | \
+    dreme-py3 -p /dev/stdin -oc dreme_escaper_vs_shuffled -maxk 10 -eps -g 1000 &
+
+awk '/esc_match/{print;getline;print}' raw_data/genehancer_esc_matched_300bp.fa | \
+    dreme-py3 -p /dev/stdin -oc dreme_escmatch_vs_shuffled -maxk 10 -eps -g 1000 &
+
+
+dreme-py3 -p <(awk '/escaper/{print;getline;print}' raw_data/genehancer_esc_matched_300bp.fa) \
+          -n <(awk '/esc_match/{print;getline;print}' raw_data/genehancer_esc_matched_300bp.fa) \
+          -oc dreme_esc_vs_repr_enh -maxk 10 -eps -g 1000 &
+
+
+```

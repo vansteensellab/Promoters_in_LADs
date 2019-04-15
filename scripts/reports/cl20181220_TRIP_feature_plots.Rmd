@@ -1,0 +1,59 @@
+
+```{r}
+library(ggplot2)
+library(ggbeeswarm)
+library(reshape2)
+library(gridExtra)
+
+load('data/cl20181013_feature_set_trip.Rdata')
+
+COL_class<-c("#A020F0", "#FFA500", "#006400", "#7e7e7e", "#0077FF")
+names(COL_class)<-c("repressed", "escaper", "inactive", 'boundary', 'iLAD')
+
+COLi<-"#00BBFF11" #dot color for iLAD promoters
+COL_lad<-c("#FF0000", "#0077FF")
+names(COL_lad)<-c('LAD', 'iLAD')
+
+X$lad = lad_vec
+
+x_col = colnames(X)
+feature_vec = x_col[!x_col%in%c('class', 'prom_name', 'lad')]
+
+plot_list = lapply(feature_vec, function(f){
+    p = ggplot(X, aes_string(x='lad', y=f, color='lad')) +
+            geom_quasirandom() +
+            geom_quasirandom(size=0.8, alpha=0.8) +
+            stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
+                         color='black', geom = "crossbar", width = 0.4) +
+            scale_color_manual(values=COL_lad) +
+            theme_bw() +
+            theme(axis.title=element_blank(),
+                  axis.text.x = element_text(angle = 45, hjust=1)) +
+            ggtitle(f) +
+            guides(color=FALSE)
+    return(p)
+})
+
+
+for (i in  seq(1,length(plot_list),6)){
+    pdf(paste0("cl20190108_chip_features_",(i+5)/6, '.pdf'), height=6, width=3,
+        useDingbats=F)
+    print(do.call(grid.arrange, c(plot_list[i:(i+5)], nrow=3)))
+    dev.off()
+}
+
+
+p1 = do.call(grid.arrange, plot_list)
+
+
+pdf("Figure_S4_chip_features.pdf",
+       width = 21,
+       height = 30)
+
+ggsave(filename="test2.pdf",
+       plot = p2,
+       device = cairo_pdf,
+       width = 210,
+       height = 297,
+       units = "mm")
+```

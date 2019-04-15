@@ -1,0 +1,174 @@
+outdir: '/DATA/usr/c.leemans/projects/trip/cl20181101_TRIP_transient_mix'
+
+indir:
+    /DATA/usr/c.leemans/data/forge/yx4x9aCqK2TJCuwR8UgDsLwcMORpOIiZ62uONIgQ
+
+input_file:
+    options:
+        M459: [M459/5073_1_BarcodedPool_NoIndex_S1_R1_001.fastq.gz]
+        run856: [run856/5014_1_BarcodedPool_NoIndex_S11_R1_001.fastq.gz]
+    pick:
+        cDNA:
+            '1to1':
+                C: [run856, run856]
+                D: [run856, run856]
+                E: [M459, M459]
+                F: [M459, M459]
+        gDNA:
+            '1to1':
+                C: [run856, run856]
+                D: [run856, run856]
+                E: [M459, M459]
+                F: [M459, M459]
+
+index:
+    cDNA:
+        '1to1':
+            C: [TACACACACT, TACAGATCGT]
+            D: [TACACGTGAT, TACGCTGTCT]
+            E: [TCTATACTAT, TGACGTATGT]
+            F: [TGTGAGTAGT, ACAGTATATA]
+    gDNA:
+        '1to1':
+            C: [ACGCGAGTAT, ACGCGAGTAT]
+            D: [ACTACTATGT, ACTACTATGT]
+            E: [TCGCACTAGT, TCGCACTAGT]
+            F: [TCTAGCGACT, TCTAGCGACT]
+
+
+demultiplexed_indir: /DATA/usr/c.leemans/data/forge/yx4x9aCqK2TJCuwR8UgDsLwcMORpOIiZ62uONIgQ
+
+demultiplexed_input:
+    cDNA:
+        '1to1':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_cDNA_MixA1_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_cDNA_MixA2_r1.fq.gz
+        '2to1':
+            B:
+                - M440/4945_1_BarcodedPool_NoIndex_cDNA_MixD1_r2.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_cDNA_MixD2_r2.fq.gz
+    gDNA:
+        '1to1':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_MixA_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_MixA_r1.fq.gz
+        '2to1':
+            B:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_MixD_r2.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_MixD_r2.fq.gz
+        '6':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_6A_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_6B_r2.fq.gz
+        '8':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_8A_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_8B_r2.fq.gz
+        '9':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_9A_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_9B_r2.fq.gz
+        '10':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_10A_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_10B_r2.fq.gz
+        '11':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_11A_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_11B_r2.fq.gz
+        '12':
+            A:
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_12A_r1.fq.gz
+                - M440/4945_1_BarcodedPool_NoIndex_pDNA_12B_r2.fq.gz
+        'hPGK':
+            A:
+                - M459/5073_1_BarcodedPool_NoIndex_hPGK_pDNA_rep1_R1.fq.gz
+                - M459/5073_1_BarcodedPool_NoIndex_hPGK_pDNA_rep2_R1.fq.gz
+
+
+lev_dist: 2
+
+min_count:
+    gDNA: 5
+
+
+
+starcode_params:
+    options:
+        gDNA:
+            lev_dist: 2
+            use_other: False
+            other: gDNA
+            count: 5
+        cDNA:
+            lev_dist: 2
+            use_other: True
+            other: gDNA
+            count: 0
+    pick:
+        cDNA:
+            '1to1':
+                A: [cDNA, cDNA]
+                C: [cDNA, cDNA]
+                D: [cDNA, cDNA]
+                E: [cDNA, cDNA]
+                F: [cDNA, cDNA]
+            '2to1':
+                B: [cDNA, cDNA]
+        gDNA:
+            '1to1':
+                A: [gDNA, gDNA]
+                C: [gDNA, gDNA]
+                D: [gDNA, gDNA]
+                E: [gDNA, gDNA]
+                F: [gDNA, gDNA]
+            '2to1':
+                B: [gDNA, gDNA]
+            '6':
+                A: [gDNA, gDNA]
+            '8':
+                A: [gDNA, gDNA]
+            '9':
+                A: [gDNA, gDNA]
+            '10':
+                A: [gDNA, gDNA]
+            '11':
+                A: [gDNA, gDNA]
+            '12':
+                A: [gDNA, gDNA]
+            'hPGK':
+                A: [gDNA, gDNA]
+
+structure:
+    options:
+        index: |
+            ID      5'      3'      type    req     second-read     pos   keep-bases
+            index   %s      -       index   present False   fixed   10
+        cgDNA: |
+            ID      5'      3'      type    req     second-read     pos   keep-bases
+            index   10      -       index   present False   fixed   -
+            pat1    GTCACAAGGGCCGGCCACAACTCGAG      -       const   present False   fixed   -
+            barcode 16      -       barcode present False   fixed   -
+            pat2    TGATCCTGCAGTGTCACCTAAAT   -       const   present False   var   -
+    pick:
+        cDNA:
+            '1to1': cgDNA
+            '2to1': cgDNA
+        gDNA:
+            '1to1': cgDNA
+            '2to1': cgDNA
+            '6': cgDNA
+            '8': cgDNA
+            '9': cgDNA
+            '10': cgDNA
+            '11': cgDNA
+            '12': cgDNA
+            'hPGK': cgDNA
+paired_end:
+    cDNA: False
+    gDNA: False
+
+
+
+parser: ~t.v.schaik/mydata/modules/read-parsing/read_parser.py
